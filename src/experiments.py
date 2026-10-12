@@ -700,11 +700,15 @@ def _(
     y_train,
     y_val,
 ):
+
     if OPTUNA_SEARCH: 
         optuna_results_gb, optuna_params_gb = fit_optuna(model_gb, param_distributions_gb, cv, make_scorer(scorer_accuracy),
             X_train, y_train, X_val, y_val)
 
-    optuna_results_gb, optuna_params_gb
+    try:
+        optuna_results_gb, optuna_params_gb
+    except:
+        print('turn OPTUNA_SEARCH to True, for enable optuna search')
     return
 
 
@@ -785,24 +789,28 @@ def _(nn):
 @app.cell
 def _(nn):
     class MyModel(nn.Module):
-        def __init__(self, inp, out):
+        def __init__(self, inp, out, hidden_sizes=[500, 200, 50], dropout=0.0):
             super().__init__()
-            self.model = nn.Sequential(
-                nn.Linear(inp, 500, bias=False),
-                nn.BatchNorm1d(500),
-                nn.LeakyReLU(0.01),
-                # nn.Dropout(p=0.2),
-                nn.Linear(500, 200, bias=False),
-                nn.BatchNorm1d(200),
-                nn.LeakyReLU(0.01),
-                # nn.Dropout(p=0.2),
-                nn.Linear(200, 50, bias=False),
-                nn.BatchNorm1d(50),
-                nn.LeakyReLU(0.01),
-                nn.Linear(50, out),
-                nn.Sigmoid()
-            )
-
+            self.inp = inp
+            self.out = out
+            self.hidden_sizes = [inp] + hidden_sizes
+            self.dropout = dropout
+            self._build_model()
+    
+        def _build_model(self):
+            layers = []
+            for hs1, hs2 in zip(self.hidden_sizes, self.hidden_sizes[1:]):
+                layers.extend(
+                    [
+                    nn.Linear(hs1, hs2, bias=False),
+                    nn.BatchNorm1d(hs2),
+                    nn.LeakyReLU(),
+                    nn.Dropout(self.dropout)
+                    ]
+                )
+            layers.append(nn.Linear(self.hidden_sizes[-1], self.out))
+            self.model = nn.Sequential(*layers) 
+        
         def forward(self, x):
             return self.model(x)
 
@@ -851,7 +859,7 @@ def _(X_train_t):
 @app.cell
 def _(MyModel, X_train_t, nn, torch):
     model2 = MyModel(X_train_t.shape[1], 1)
-    loss_model2 = nn.BCELoss()
+    loss_model2 = nn.BCEWithLogitsLoss()
     opt2 = torch.optim.AdamW(model2.parameters(), lr=3e-4)
     sched2 = torch.optim.lr_scheduler.ReduceLROnPlateau(opt2, )
     return loss_model2, model2, opt2, sched2
@@ -860,7 +868,7 @@ def _(MyModel, X_train_t, nn, torch):
 @app.cell
 def _(MLPModel, X_train_t, nn, torch):
     model1 = MLPModel(X_train_t.shape[1], 1)
-    loss_model1 = nn.BCELoss()
+    loss_model1 = nn.BCEWithLogitsLoss()
     opt1 = torch.optim.Adam(model1.parameters(), lr=0.01)
     return loss_model1, model1, opt1
 
@@ -933,8 +941,8 @@ def _(DEVICE, torch, tqdm):
 
 
 @app.cell
-def _(DEVICE, single_eval, single_train, torch):
-    def epoch_train(model, loss_model, opt, train_loader, val_loader, sched=None, epoches=15):
+def _(DEVICE, optuna, single_eval, single_train, torch):
+    def epoch_train(model, loss_model, opt, train_loader, val_loader, sched=None, epoches=15, trial=None):
         model.to(DEVICE)
         train_loss = []
         train_acc = []
@@ -950,14 +958,20 @@ def _(DEVICE, single_eval, single_train, torch):
                     sched.step(single_val_loss)
                 else:
                     sched.step()
+                
+            if trial is not None:
+                trial.report(single_val_acc, epoch)
+                if trial.should_prune():
+                    raise optuna.exceptions.TrialPruned()
+
             
             train_loss.append(single_train_loss)
             train_acc.append(single_train_acc)
             val_loss.append(single_val_loss)
             val_acc.append(single_val_acc)
             summary.append(
-                f'[{epoch + 1}/{epoches}],train_loss={round(single_train_loss, 4)},\
-                train_acc={round(single_train_acc, 4)},val_loss={round(single_val_loss, 4)},\
+                f'[{epoch + 1}/{epoches}],train_loss={round(single_train_loss, 4)}|\
+                train_acc={round(single_train_acc, 4)}|val_loss={round(single_val_loss, 4)}|\
                 val_acc={round(single_val_acc, 4)}'
             )
 
@@ -1038,8 +1052,81 @@ def _(
     return
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### optuna dnn
+    """)
+    return
+
+
 @app.cell
-def _():
+def _(MyModel, Path, epoch_train, nn, torch, train_loader, val_loader):
+    def objective(trial):
+        checkpoint_dir = Path('checkpoints/optuna/')
+        checkpoint_dir.mkdir(exist_ok=True, parents=True)
+    
+        hidden_sizes = [
+        trial.suggest_categorical("hidden_1", [250, 500]),
+        trial.suggest_categorical("hidden_2", [100, 200]),
+        trial.suggest_categorical("hidden_3", [25, 50]),
+        ]
+        dropout = trial.suggest_float("dropout", 0.0, 0.3)
+    
+        inp = 10
+        out = 1
+
+        model = MyModel(
+            inp,
+            out,
+            hidden_sizes=hidden_sizes,
+            dropout=dropout,
+        )
+
+        loss_model = nn.BCEWithLogitsLoss()
+        lr = trial.suggest_float("lr", 1e-4, 1e-2, log=True)
+        opt = torch.optim.AdamW(model.parameters(), lr=lr)
+        sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt)
+
+        result = epoch_train(
+            model,
+            loss_model,
+            opt,
+            train_loader,
+            val_loader,
+            sched,
+            15,
+            trial     
+        )
+
+        accuracy = result['val_acc'][-1]
+
+        torch.save(
+            {
+                "model_state_dict": model.state_dict(),
+                "inp": inp,
+                "out": out,
+                "hidden_sizes": hidden_sizes,
+                "dropout": dropout,
+                "accuracy": accuracy,
+            },
+            checkpoint_dir / f"trial_{trial.number}.pt",
+        )
+    
+        return accuracy
+
+    return (objective,)
+
+
+@app.cell
+def _(DEVICE, OPTUNA_SEARCH, Path, objective, optuna, torch):
+    if OPTUNA_SEARCH:
+        study = optuna.create_study(direction='maximize')
+        study.optimize(objective, n_trials=100)
+        checkpoint_dir = Path('checkpoints/optuna/')
+
+        best_model = torch.load(checkpoint_dir / f'trial_{study.best_trial.number}.pt', map_location=DEVICE, weights_only=True)
+        print(best_model['accuracy'])
     return
 
 
