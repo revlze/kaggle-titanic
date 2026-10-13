@@ -1,7 +1,15 @@
 import marimo
 
-__generated_with = "0.24.2"
+__generated_with = "0.25.1"
 app = marimo.App()
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Imports
+    """)
+    return
 
 
 @app.cell
@@ -31,7 +39,7 @@ def _():
     from sklearn.pipeline import Pipeline
     from sklearn.compose import ColumnTransformer
     from sklearn.impute import SimpleImputer
-    from sklearn.preprocessing import StandardScaler, OneHotEncoder
+    from sklearn.preprocessing import StandardScaler, OneHotEncoder, OrdinalEncoder
     from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 
     from lightgbm import LGBMClassifier
@@ -54,6 +62,7 @@ def _():
         LinearRegression,
         LogisticRegression,
         OneHotEncoder,
+        OrdinalEncoder,
         Path,
         Pipeline,
         RandomForestClassifier,
@@ -99,8 +108,11 @@ def _(set_seed):
 @app.cell
 def _(Path):
     base_path = Path('/users/platon/Documents/final_proj/')
+    checkpoint_dir = base_path / 'checkpoints/'
     data_path = base_path / 'data/titanic/'
-    return (data_path,)
+
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    return checkpoint_dir, data_path
 
 
 @app.cell(hide_code=True)
@@ -169,7 +181,7 @@ def _(
         ('numeric', numeric, ['Pclass', 'Age', 'SibSp', 'Parch', 'Fare']),
         ('categorical', categorical, ['Sex', 'Embarked']),
     ])
-    return (preprocess,)
+    return numeric, preprocess
 
 
 @app.cell(hide_code=True)
@@ -734,7 +746,6 @@ def _(X_train, X_val, clone, preprocess, torch, y_train, y_val):
     X_train_np = nn_preprocess.fit_transform(X_train)
     X_val_np = nn_preprocess.transform(X_val)
 
-
     X_train_t = torch.as_tensor(X_train_np, dtype=torch.float32)
     y_train_t = torch.tensor(y_train.to_numpy(), 
     dtype=torch.float32).unsqueeze(1)
@@ -787,7 +798,7 @@ def _(nn):
 
 
 @app.cell
-def _(nn):
+def MyModel(nn):
     class MyModel(nn.Module):
         def __init__(self, inp, out, hidden_sizes=[500, 200, 50], dropout=0.0):
             super().__init__()
@@ -796,7 +807,7 @@ def _(nn):
             self.hidden_sizes = [inp] + hidden_sizes
             self.dropout = dropout
             self._build_model()
-    
+
         def _build_model(self):
             layers = []
             for hs1, hs2 in zip(self.hidden_sizes, self.hidden_sizes[1:]):
@@ -810,7 +821,7 @@ def _(nn):
                 )
             layers.append(nn.Linear(self.hidden_sizes[-1], self.out))
             self.model = nn.Sequential(*layers) 
-        
+
         def forward(self, x):
             return self.model(x)
 
@@ -958,13 +969,13 @@ def _(DEVICE, optuna, single_eval, single_train, torch):
                     sched.step(single_val_loss)
                 else:
                     sched.step()
-                
+    
             if trial is not None:
                 trial.report(single_val_acc, epoch)
                 if trial.should_prune():
                     raise optuna.exceptions.TrialPruned()
 
-            
+
             train_loss.append(single_train_loss)
             train_acc.append(single_train_acc)
             val_loss.append(single_val_loss)
@@ -1061,18 +1072,35 @@ def _(mo):
 
 
 @app.cell
-def _(MyModel, Path, epoch_train, nn, torch, train_loader, val_loader):
-    def objective(trial):
-        checkpoint_dir = Path('checkpoints/optuna/')
-        checkpoint_dir.mkdir(exist_ok=True, parents=True)
-    
+def _(
+    MyModel,
+    checkpoint_dir,
+    epoch_train,
+    nn,
+    num_slice,
+    torch,
+    train_loader,
+    val_loader,
+):
+    def objective(trial, use_embedding=False, name=''):
+        optuna_dir = checkpoint_dir / f'optuna_{name}'
+        optuna_dir.mkdir(exist_ok=True, parents=True)
+
         hidden_sizes = [
         trial.suggest_categorical("hidden_1", [250, 500]),
         trial.suggest_categorical("hidden_2", [100, 200]),
         trial.suggest_categorical("hidden_3", [25, 50]),
         ]
         dropout = trial.suggest_float("dropout", 0.0, 0.3)
-    
+        if use_embedding:
+            sex_emb_dim = trial.suggest_categorical("sex_emb_dim", [1, 2, 3])
+            embarked_emb_dim = trial.suggest_categorical(
+                "embarked_emb_dim", [1, 2, 3]
+            )
+
+        n_num = num_slice.stop - num_slice.start
+        inp = n_num + sex_emb_dim + embarked_emb_dim
+
         inp = 10
         out = 1
 
@@ -1100,33 +1128,232 @@ def _(MyModel, Path, epoch_train, nn, torch, train_loader, val_loader):
         )
 
         accuracy = result['val_acc'][-1]
-
-        torch.save(
+        if use_embedding:
+            torch.save(
             {
                 "model_state_dict": model.state_dict(),
                 "inp": inp,
                 "out": out,
                 "hidden_sizes": hidden_sizes,
                 "dropout": dropout,
+                'sex_emb_dim': sex_emb_dim,
+                'embarked_emb_dim': embarked_emb_dim,
                 "accuracy": accuracy,
             },
-            checkpoint_dir / f"trial_{trial.number}.pt",
+            optuna_dir / f"trial_{trial.number}.pt",
         )
-    
+        else:
+            torch.save(
+                {
+                    "model_state_dict": model.state_dict(),
+                    "inp": inp,
+                    "out": out,
+                    "hidden_sizes": hidden_sizes,
+                    "dropout": dropout,
+                    "accuracy": accuracy,
+                },
+                optuna_dir / f"trial_{trial.number}.pt",
+            )
+
         return accuracy
 
     return (objective,)
 
 
-@app.cell
-def _(DEVICE, OPTUNA_SEARCH, Path, objective, optuna, torch):
+app._unparsable_cell(
+    r"""
     if OPTUNA_SEARCH:
         study = optuna.create_study(direction='maximize')
-        study.optimize(objective, n_trials=100)
-        checkpoint_dir = Path('checkpoints/optuna/')
+        study.optimize(labmda trial: objective(trial, name='default'), n_trials=100)
 
         best_model = torch.load(checkpoint_dir / f'trial_{study.best_trial.number}.pt', map_location=DEVICE, weights_only=True)
         print(best_model['accuracy'])
+    """,
+    name="_"
+)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Add embedding to dnn
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    #### preprocess
+    """)
+    return
+
+
+@app.cell
+def _(ColumnTransformer, OrdinalEncoder, Pipeline, SimpleImputer, np, numeric):
+    categorical_embedding = Pipeline([
+        ("imputer", SimpleImputer(
+            missing_values=None,
+            strategy="most_frequent",
+        )),
+        ("encoder", OrdinalEncoder(
+            handle_unknown="use_encoded_value",
+            unknown_value=-1,
+            dtype=np.int64,
+        )),
+    ])
+
+    preprocess_embedding = ColumnTransformer([
+        ('numeric', numeric, ['Pclass', 'Age', 'SibSp', 'Parch', 'Fare']),
+        ('categorical', categorical_embedding, ['Sex', 'Embarked']),
+    ])
+    return (preprocess_embedding,)
+
+
+@app.cell
+def _(X_train, X_val, clone, preprocess_embedding, torch, y_train, y_val):
+    nn_preprocess_embedding = clone(preprocess_embedding)
+    X_train_np_emb = nn_preprocess_embedding.fit_transform(X_train)
+    X_val_np_emb = nn_preprocess_embedding.transform(X_val)
+
+    num_slice = nn_preprocess_embedding.output_indices_["numeric"]
+    cat_slice = nn_preprocess_embedding.output_indices_["categorical"]
+
+    X_train_t_emb = torch.as_tensor(
+        X_train_np_emb, dtype=torch.float32
+    )
+    y_train_t_emb = torch.tensor(y_train.to_numpy(), 
+    dtype=torch.float32).unsqueeze(1)
+
+
+    X_val_t_emb = torch.as_tensor(
+        X_val_np_emb, dtype=torch.float32
+    )
+    y_val_t_emb = torch.tensor(y_val.to_numpy(),
+    dtype=torch.float32).unsqueeze(1)
+    return cat_slice, num_slice
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    #### loaders
+    """)
+    return
+
+
+@app.cell
+def _(DataLoader, TensorDataset, X_train_t, X_val_t, y_train_t, y_val_t):
+    train_loader_emb = DataLoader(
+        TensorDataset(X_train_t, y_train_t),
+        batch_size=64,
+        shuffle=True,
+    )
+
+    val_loader_emb = DataLoader(
+        TensorDataset(X_val_t, y_val_t),
+        batch_size=64,
+    )
+    return train_loader_emb, val_loader_emb
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    #### model
+    """)
+    return
+
+
+@app.cell
+def _(nn, torch):
+    class MyModelEmb(nn.Module):
+        def __init__(self, inp, out, num_slice, cat_slice, hidden_sizes=[500, 200, 50], dropout=0.0, sex_emb_dim=2, embarked_emb_dim=2):
+            super().__init__()
+            self.inp = inp
+            self.out = out
+            self.hidden_sizes = [inp] + hidden_sizes
+            self.dropout = dropout
+            self._build_model()
+            self.sex_emb = nn.Embedding(3, sex_emb_dim)
+            self.embarked_emb = nn.Embedding(4, embarked_emb_dim)
+            self.num_slice = num_slice
+            self.cat_slice = cat_slice
+
+        def _build_model(self):
+            layers = []
+            for hs1, hs2 in zip(self.hidden_sizes, self.hidden_sizes[1:]):
+                layers.extend(
+                    [
+                    nn.Linear(hs1, hs2, bias=False),
+                    nn.BatchNorm1d(hs2),
+                    nn.LeakyReLU(),
+                    nn.Dropout(self.dropout)
+                    ]
+                )
+            layers.append(nn.Linear(self.hidden_sizes[-1], self.out))
+            self.model = nn.Sequential(*layers) 
+
+        def forward(self, x):
+            x_num = x[:, self.num_slice]
+            x_cat = x[:, self.cat_slice].to(torch.int32) + 1
+            sex_vector = self.sex_emb(x_cat[:, 0])
+            embarked_vector = self.embarked_emb(x_cat[:, 1])
+            x = torch.cat([x_num, sex_vector, embarked_vector], dim=1)
+            return self.model(x)
+
+    return (MyModelEmb,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    #### setup model
+    """)
+    return
+
+
+@app.cell
+def _(MyModelEmb, cat_slice, nn, num_slice, torch):
+    model_emb = MyModelEmb(5 + 2 * 2, 1, num_slice, cat_slice)
+    loss_model_emb = nn.BCEWithLogitsLoss()
+    opt_emb = torch.optim.AdamW(model_emb.parameters(), lr=0.01)
+    sched_emb = torch.optim.lr_scheduler.ReduceLROnPlateau(opt_emb)
+    return loss_model_emb, model_emb, opt_emb, sched_emb
+
+
+@app.cell
+def _(
+    epoch_train,
+    loss_model_emb,
+    model_emb,
+    opt_emb,
+    sched_emb,
+    train_loader_emb,
+    val_loader_emb,
+):
+    results = epoch_train(model_emb, loss_model_emb, opt_emb, train_loader_emb, val_loader_emb, sched_emb)
+    max(results['val_acc'])
+    return
+
+
+@app.cell
+def _(DEVICE, checkpoint_dir, objective, optuna, torch):
+    if True:
+        name_exp = 'emb_v1'
+        study_emb = optuna.create_study(direction='maximize')
+        study_emb.optimize(lambda trial: objective(trial, use_embedding=True, name=name_exp), n_trials=100)
+    
+
+        best_model_emb = torch.load(checkpoint_dir / f'optuna_{name_exp}' / f'trial_{study_emb.best_trial.number}.pt', map_location=DEVICE, weights_only=True)
+        print(best_model_emb['accuracy'])
+    return (best_model_emb,)
+
+
+@app.cell
+def _(best_model_emb):
+    print(best_model_emb['accuracy'])
+    print(best_model_emb)
     return
 
 
