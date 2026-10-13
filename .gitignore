@@ -16,3 +16,4 @@ data/
 *.lock
 __marimo__
 AGENTS.md
+checkpoints/
