@@ -146,20 +146,67 @@ def _(test_dataset, train_dataset):
 
     train_set= train_dataset.drop(['PassengerId', 'Name'])
     test_set = test_dataset.drop(['PassengerId', 'Name'])
-    return test_set, train_set
+    return (train_set,)
 
 
 @app.cell
 def _(train_set):
     X, y = train_set.drop('Survived'), train_set['Survived']
-    return X, y
+    return (y,)
 
 
 @app.cell
-def _(SEED, X, test_set, train_test_split, y):
-    X_train, X_val, y_train, y_val = train_test_split(X, y, train_size=0.8, stratify=y, random_state=SEED)
-    X_test = test_set
-    return X_train, X_val, y_train, y_val
+def _():
+    # X_train, X_val, y_train, y_val = train_test_split(X, y, train_size=0.8, stratify=y, random_state=SEED)
+    # X_test = test_set
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Feature Engeeniring
+    """)
+    return
+
+
+@app.cell
+def _(SEED, pl, test_dataset, train_dataset, train_test_split, y):
+    train_set_agg = train_dataset.with_columns(
+        pl.col('Name')
+        .str.extract(r',\s*([^.]+)\.', 1)
+        .alias('Title')
+    )
+    train_set_agg = train_set_agg.with_columns(
+        (pl.col('SibSp') + pl.col('Parch') + 1)
+        .alias('FamilySize')
+    )
+
+    train_set_agg = train_set_agg.drop(['PassengerId', 'Name'])
+    test_set_agg = test_dataset.drop(['PassengerId', 'Name'])
+
+    X_agg, y_agg = train_set_agg.drop('Survived'), train_set_agg['Survived']
+
+    X_train, X_val, y_train, y_val = train_test_split(X_agg, y_agg, train_size=0.8, stratify=y, random_state=SEED)
+    X_test = test_set_agg
+    return X_train, X_val, train_set_agg, y_train, y_val
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### новые стоблцы
+
+    - title — это спрасенные обращения из колонки 'Name'
+    - familysize — это SibSp + Parch + 1, просто общее кол-во семьи на борту
+    """)
+    return
+
+
+@app.cell
+def _(train_set_agg):
+    train_set_agg
+    return
 
 
 @app.cell(hide_code=True)
@@ -189,8 +236,8 @@ def _(
     ])
 
     preprocess = ColumnTransformer([
-        ('numeric', numeric, ['Pclass', 'Age', 'SibSp', 'Parch', 'Fare']),
-        ('categorical', categorical, ['Sex', 'Embarked', 'Cabin', 'Ticket']),
+        ('numeric', numeric, ['Pclass', 'Age', 'SibSp', 'Parch', 'Fare', 'FamilySize']),
+        ('categorical', categorical, ['Sex', 'Embarked', 'Cabin', 'Ticket', 'Title']),
     ])
     return numeric, preprocess
 
@@ -679,18 +726,20 @@ def _(
         ]),
         'CatBoost': Pipeline([
             ('preporcess', preprocess),
-            ('model', CatBoostClassifier())
+            ('model', CatBoostClassifier(verbose=False)),
         ])
     }
 
     param_distributions_gb = {
         'GradientBoostingClassifier': {
-            'model__loss': optuna.distributions.CategoricalDistribution(['log_loss', 'exponential']),
+            'model__loss': optuna.distributions.CategoricalDistribution(
+                ['log_loss', 'exponential']
+            ),
             'model__learning_rate': optuna.distributions.FloatDistribution(1e-4, 1e-1),
             'model__n_estimators': optuna.distributions.IntDistribution(10, 200),
             'model__min_samples_split': optuna.distributions.IntDistribution(2, 50),
             'model__min_samples_leaf': optuna.distributions.IntDistribution(1, 50),
-            'model__max_depth': optuna.distributions.IntDistribution(1, 10)
+            'model__max_depth': optuna.distributions.IntDistribution(1, 10),
         },
         'LGBMClassifier': {
             'model__num_leaves': optuna.distributions.IntDistribution(3, 100),
@@ -705,7 +754,16 @@ def _(
             'model__gamma': optuna.distributions.IntDistribution(0, 100),
             'model__max_depth': optuna.distributions.IntDistribution(1, 32),
         },
-
+        'CatBoost': {
+            'model__iterations': optuna.distributions.IntDistribution(200, 800),
+            'model__depth': optuna.distributions.IntDistribution(3, 7),
+            'model__learning_rate': optuna.distributions.FloatDistribution(
+                0.01, 0.15
+            ),
+            'model__l2_leaf_reg': optuna.distributions.FloatDistribution(
+                1, 10
+            ),
+        },
     }
     return model_gb, param_distributions_gb
 
@@ -1205,10 +1263,11 @@ def _(
         embarked_emb_dim = trial.suggest_categorical("embarked_emb_dim", [1, 2, 3])
         cabin_emb_dim = trial.suggest_categorical("cabin_emb_dim", [1, 2, 3])
         ticket_emb_dim = trial.suggest_categorical("ticket_emb_dim", [1, 2, 3])
+        title_emb_dim = trial.suggest_categorical("title_emb_dim", [1, 2, 3])
 
         n_num = num_slice.stop - num_slice.start
         model_params = {
-            "inp": n_num + sex_emb_dim + embarked_emb_dim + cabin_emb_dim + ticket_emb_dim,
+            "inp": n_num + sex_emb_dim + embarked_emb_dim + cabin_emb_dim + ticket_emb_dim + title_emb_dim,
             "out": 1,
             "hidden_sizes": hidden_sizes,
             "dropout": dropout,
@@ -1216,6 +1275,7 @@ def _(
             "embarked_emb_dim": embarked_emb_dim,
             "cabin_emb_dim": cabin_emb_dim,
             "ticket_emb_dim": ticket_emb_dim,
+            'title_emb_dim': title_emb_dim,
         }
         model = MyModelEmb(
             num_slice=num_slice, cat_slice=cat_slice, **model_params
@@ -1239,6 +1299,11 @@ def _(DEVICE, OPTUNA_SEARCH, checkpoint_dir, objective_mlp, optuna, torch):
         best_model = torch.load(checkpoint_dir / f'optuna_{name}' /f'trial_{study.best_trial.number}.pt', map_location=DEVICE, weights_only=True)
         print(best_model['accuracy'])
     return (best_model,)
+
+
+@app.cell
+def _():
+    return
 
 
 @app.cell(hide_code=True)
@@ -1272,8 +1337,8 @@ def _(ColumnTransformer, OrdinalEncoder, Pipeline, SimpleImputer, np, numeric):
     ])
 
     preprocess_embedding = ColumnTransformer([
-        ('numeric', numeric, ['Pclass', 'Age', 'SibSp', 'Parch', 'Fare']),
-        ('categorical', categorical_embedding, ['Sex', 'Embarked', 'Cabin', 'Ticket']),
+        ('numeric', numeric, ['Pclass', 'Age', 'SibSp', 'Parch', 'Fare', 'FamilySize']),
+        ('categorical', categorical_embedding, ['Sex', 'Embarked', 'Cabin', 'Ticket', 'Title']),
     ])
     return (preprocess_embedding,)
 
@@ -1307,6 +1372,12 @@ def _(X_train, X_val, clone, preprocess_embedding, torch, y_train, y_val):
         y_train_t_emb,
         y_val_t_emb,
     )
+
+
+@app.cell
+def _(X_train):
+    X_train['Title'].unique().shape
+    return
 
 
 @app.cell(hide_code=True)
@@ -1356,7 +1427,7 @@ def _(mo):
 @app.cell
 def _(nn, torch):
     class MyModelEmb(nn.Module):
-        def __init__(self, inp, out, num_slice, cat_slice, hidden_sizes=[500, 200, 50], dropout=0.0, sex_emb_dim=2, embarked_emb_dim=2, cabin_emb_dim=2, ticket_emb_dim=2):
+        def __init__(self, inp, out, num_slice, cat_slice, hidden_sizes=[500, 200, 50], dropout=0.0, sex_emb_dim=2, embarked_emb_dim=2, cabin_emb_dim=2, ticket_emb_dim=2, title_emb_dim=2):
             super().__init__()
             self.inp = inp
             self.out = out
@@ -1366,8 +1437,8 @@ def _(nn, torch):
             self.sex_emb = nn.Embedding(3, sex_emb_dim)
             self.embarked_emb = nn.Embedding(4, embarked_emb_dim)
             self.cabin_emb = nn.Embedding(124, cabin_emb_dim)
-            self.ticket_emb = nn.Embedding(562
-            , ticket_emb_dim)
+            self.ticket_emb = nn.Embedding(562, ticket_emb_dim)
+            self.title_emb = nn.Embedding(16, title_emb_dim)
             self.num_slice = num_slice
             self.cat_slice = cat_slice
 
@@ -1392,7 +1463,8 @@ def _(nn, torch):
             embarked_vector = self.embarked_emb(x_cat[:, 1])
             cabin_vector = self.cabin_emb(x_cat[:, 2])
             ticket_vector = self.ticket_emb(x_cat[:, 3])
-            x = torch.cat([x_num, sex_vector, embarked_vector, cabin_vector, ticket_vector], dim=1)
+            title_vector = self.title_emb(x_cat[:, 4])
+            x = torch.cat([x_num, sex_vector, embarked_vector, cabin_vector, ticket_vector, title_vector], dim=1)
             return self.model(x)
 
     return (MyModelEmb,)
@@ -1408,7 +1480,7 @@ def _(mo):
 
 @app.cell
 def _(MyModelEmb, cat_slice, nn, num_slice, torch):
-    model_emb = MyModelEmb(5 + 4 * 2, 1, num_slice, cat_slice)
+    model_emb = MyModelEmb(6 + 5 * 2, 1, num_slice, cat_slice)
     loss_model_emb = nn.BCEWithLogitsLoss()
     opt_emb = torch.optim.AdamW(model_emb.parameters(), lr=0.01)
     sched_emb = torch.optim.lr_scheduler.ReduceLROnPlateau(opt_emb)
@@ -1427,11 +1499,6 @@ def _(
 ):
     results = epoch_train(model_emb, loss_model_emb, opt_emb, train_loader_emb, val_loader_emb, sched_emb)
     max(results['val_acc'])
-    return
-
-
-@app.cell
-def _():
     return
 
 
@@ -1525,25 +1592,6 @@ def _(
     )
 
     compare_fig
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## Feature Engineering
-    """)
-    return
-
-
-@app.cell
-def _(X_train):
-    X_train
-    return
-
-
-@app.cell
-def _():
     return
 
 
