@@ -17,3 +17,5 @@ data/
 __marimo__
 AGENTS.md
 checkpoints/
+
+catboost_info
