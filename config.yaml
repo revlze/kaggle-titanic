@@ -1,0 +1,53 @@
+base:
+  exp_name: lr_v1
+  seed: 0xFACED
+  run_kind: full  # Use smoke for short protocol checks; do not rank smoke scores.
+
+run:
+  mode: full  # full, evaluate, train, predict
+  model_path: null  # Required only for predict; path to a saved model.joblib.
+
+data:
+  train_path: data/titanic/train.csv
+  test_path: data/titanic/test.csv
+
+features:
+  feature_set: base_title_family
+
+preprocessing:
+  encoding: onehot
+  scale: true  # Set true for LogisticRegression.
+
+model:
+  name: LogisticRegression
+  params:
+    C: 1.0
+    max_iter: 2000
+    random_state: ${base.seed}
+
+validation:
+  development_size: 0.8
+  n_splits: 5
+  inner_splits: 3  # Used only when tuning is enabled.
+
+tuning:
+  enabled: false
+  n_trials: 60  # Per outer fold, plus one separate search for final training.
+  # Original GB ranges. Keys are native model parameters, without model__.
+  # For LogisticRegression replace this mapping with the C example in README.
+  search_space:
+    loss: {type: categorical, choices: [log_loss, exponential]}
+    learning_rate: {type: float, low: 0.0001, high: 0.1}
+    n_estimators: {type: int, low: 10, high: 200}
+    min_samples_split: {type: int, low: 2, high: 50}
+    min_samples_leaf: {type: int, low: 1, high: 50}
+    max_depth: {type: int, low: 1, high: 10}
+
+metric:
+  name: accuracy
+
+output:
+  dir: artifacts
+
+comparison:
+  runs: []  # Run folders, e.g. artifacts/gb_v1/<run_id> and artifacts/lr_v1/<run_id>.
