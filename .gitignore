@@ -22,3 +22,4 @@ catboost_info
 
 # Reproducible run outputs (configs, reports, models and predictions).
 artifacts/
+results/
