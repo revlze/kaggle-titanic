@@ -71,7 +71,7 @@ def _():
     from tqdm import tqdm
     from pathlib import Path
 
-    from final_proj.utils import set_seed
+    from utils import set_seed
 
     return (
         CatBoostClassifier,
@@ -123,60 +123,8 @@ def _(data_path, pl):
 
 
 @app.cell
-def _(
-    ColumnTransformer,
-    OneHotEncoder,
-    OrdinalEncoder,
-    Pipeline,
-    SimpleImputer,
-    StandardScaler,
-    pl,
-):
-    feature_sets = {
-        'base': [],
-        'base_title': ['Title'],
-        'base_family': ['FamilySize'],
-        'base_title_family': ['Title', 'FamilySize'],
-        'base_ticket_cabin': ['Ticket', 'Cabin'],
-        'all': ['Title', 'FamilySize', 'Ticket', 'Cabin'],
-    }
-
-    def make_features(df, feature_set='base'):
-        """Создать построчные признаки одинаково для train и test, без таргета."""
-        extra = feature_sets[feature_set]
-        numeric_columns = ['Pclass', 'Age', 'SibSp', 'Parch', 'Fare']
-        categorical_columns = ['Sex', 'Embarked']
-        if 'Title' in extra:
-            df = df.with_columns(
-                pl.col('Name').str.extract(r',\s*([^.]+)\.', 1).alias('Title')
-            )
-        if 'FamilySize' in extra:
-            df = df.with_columns((pl.col('SibSp') + pl.col('Parch') + 1).alias('FamilySize'))
-            numeric_columns += ['FamilySize']
-        categorical_columns += [c for c in ['Cabin', 'Ticket', 'Title'] if c in extra]
-        return df.select(numeric_columns + categorical_columns), numeric_columns, categorical_columns
-
-    def make_preprocess(numeric_columns, categorical_columns, encoding='onehot', scale=True):
-        """Вернуть unfitted preprocessing: fit вызывается внутри train-фолда."""
-        numeric_steps = [('imputer', SimpleImputer(strategy='median'))]
-        if scale:
-            numeric_steps.append(('scaler', StandardScaler()))
-        numeric = Pipeline(numeric_steps)
-        if encoding == 'onehot':
-            encoder = OneHotEncoder(handle_unknown='ignore', sparse_output=False)
-        elif encoding == 'ordinal':
-            encoder = OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1)
-        else:
-            raise ValueError(f'Unknown encoding: {encoding}')
-        categorical = Pipeline([
-            ('imputer', SimpleImputer(missing_values=None, strategy='most_frequent')),
-            ('encoder', encoder),
-        ])
-        return ColumnTransformer([
-            ('numeric', numeric, numeric_columns),
-            ('categorical', categorical, categorical_columns),
-        ])
-
+def _():
+    from features import make_features, make_preprocess
     return make_features, make_preprocess
 
 
@@ -262,11 +210,8 @@ def _(accuracy_score, clone, np, pl, tqdm):
                 y_train
             )
 
-            model.fit(X_train, y_train)
-
-            pred_val = model.predict(X_val)
-
-            result["val_acc"] = np.round(scorer_accuracy(y_val, pred_val), 4)
+            # Feature selection must not inspect the previously viewed holdout.
+            result["score_role"] = "exploratory_feature_cv"
 
 
             results.append(result)
@@ -291,7 +236,7 @@ def _(
     val_i,
 ):
     def save_experiments(results, name, parameters=None, feature_set='base',
-                         score_role='fixed_configuration_cv', extra=None):
+                         score_role='exploratory_feature_cv', extra=None):
         """Сохранить метрики, конфигурацию и точные разбиения завершённого запуска."""
         from datetime import datetime, timezone
         from importlib.metadata import version
@@ -370,7 +315,7 @@ def _(
 
 @app.cell
 def _(feature_results):
-    feature_results.drop(['cv_fold_scores', 'cv_val_indices', 'cv_std'])
+    feature_results.drop(['cv_fold_scores', 'cv_val_indices', 'cv_std']) if feature_results is not None else None
     return
 
 
@@ -381,7 +326,7 @@ def _(mo):
 
     Разность считается по тем же фолдам и отдельно для каждой модели.
     Положительное среднее на пяти фолдах само по себе не доказывает
-    устойчивое улучшение; посмотри на отдельные разности и holdout.
+    устойчивое улучшение; посмотри на отдельные разности. Holdout не используется.
     """)
     return
 
@@ -398,7 +343,6 @@ def _(feature_models, feature_results, np, pl):
                     'model': _model, 'features': _row['features'],
                     'cv_acc': _row['cv_acc'], 'cv_std': _row['cv_std'],
                     'delta_cv': _row['cv_acc'] - _baseline['cv_acc'],
-                    'delta_holdout': _row['val_acc'] - _baseline['val_acc'],
                     'paired_fold_deltas': (np.array(_row['cv_fold_scores']) - np.array(_baseline['cv_fold_scores'])).tolist(),
                 })
         feature_deltas = pl.DataFrame(_rows)

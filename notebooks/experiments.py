@@ -56,7 +56,7 @@ def _():
     from tqdm import tqdm
     from pathlib import Path
 
-    from final_proj.utils import set_seed
+    from utils import set_seed
 
     return (
         CatBoostClassifier,
@@ -114,8 +114,8 @@ def _(set_seed):
 
 
 @app.cell
-def _(Path):
-    base_path = Path('/users/platon/Documents/final_proj/')
+def _(mo):
+    base_path = mo.notebook_location().parent
     checkpoint_dir = base_path / 'checkpoints/'
     data_path = base_path / 'data/titanic/'
 

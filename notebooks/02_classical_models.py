@@ -18,8 +18,9 @@ def _(mo):
 
     Сравниваем модели при одном наборе признаков. `FEATURE_SET='base'`
     соответствует семи исходным признакам. Primary metric — accuracy.
-    Сначала фиксируем stratified holdout 20%, затем выполняем 5-fold CV
-    только на оставшихся 80%; preprocessing обучается внутри каждого фолда.
+    Сначала фиксируем stratified holdout 20%. На оставшихся 80% baseline
+    использует 5-fold CV, а Optuna — nested CV 5×3. Preprocessing обучается
+    внутри каждого fit; ранее просмотренный holdout не оценивается.
 
     Для запуска baseline включи `RUN_MODELS`. Подбор включается отдельно
     через `OPTUNA_SEARCH`; `N_TRIALS` задаёт бюджет на модель. Открытие
@@ -76,7 +77,7 @@ def _():
     from tqdm import tqdm
     from pathlib import Path
 
-    from final_proj.utils import set_seed
+    from utils import set_seed
 
     return (
         CatBoostClassifier,
@@ -119,11 +120,11 @@ def _():
 @app.cell
 def _(datetime, set_seed, timezone):
     SEED = 0xFACED
-    FEATURE_SET = "base"
+    FEATURE_SET = "base_title_family"
     RUN_MODELS = False
     OPTUNA_SEARCH = False
-    N_TRIALS = 20
-    SAVE_RESULTS = False
+    N_TRIALS = 30
+    SAVE_RESULTS = True
     RUN_ID = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%fZ")
     set_seed(SEED)
     return (
@@ -153,77 +154,8 @@ def _(data_path, pl):
 
 
 @app.cell
-def _(
-    ColumnTransformer,
-    OneHotEncoder,
-    OrdinalEncoder,
-    Pipeline,
-    SimpleImputer,
-    StandardScaler,
-    pl,
-):
-    feature_sets = {
-        "base": [],
-        "base_title": ["Title"],
-        "base_family": ["FamilySize"],
-        "base_title_family": ["Title", "FamilySize"],
-        "base_ticket_cabin": ["Ticket", "Cabin"],
-        "all": ["Title", "FamilySize", "Ticket", "Cabin"],
-    }
-
-    def make_features(df, feature_set="base"):
-        """Создать построчные признаки одинаково для train и test, без таргета."""
-        extra = feature_sets[feature_set]
-        numeric_columns = ["Pclass", "Age", "SibSp", "Parch", "Fare"]
-        categorical_columns = ["Sex", "Embarked"]
-        if "Title" in extra:
-            df = df.with_columns(
-                pl.col("Name").str.extract(r",\s*([^.]+)\.", 1).alias("Title")
-            )
-        if "FamilySize" in extra:
-            df = df.with_columns(
-                (pl.col("SibSp") + pl.col("Parch") + 1).alias("FamilySize")
-            )
-            numeric_columns += ["FamilySize"]
-        categorical_columns += [c for c in ["Cabin", "Ticket", "Title"] if c in extra]
-        return (
-            df.select(numeric_columns + categorical_columns),
-            numeric_columns,
-            categorical_columns,
-        )
-
-    def make_preprocess(
-        numeric_columns, categorical_columns, encoding="onehot", scale=True
-    ):
-        """Вернуть unfitted preprocessing: fit вызывается внутри train-фолда."""
-        numeric_steps = [("imputer", SimpleImputer(strategy="median"))]
-        if scale:
-            numeric_steps.append(("scaler", StandardScaler()))
-        numeric = Pipeline(numeric_steps)
-        if encoding == "onehot":
-            encoder = OneHotEncoder(handle_unknown="ignore", sparse_output=False)
-        elif encoding == "ordinal":
-            encoder = OrdinalEncoder(
-                handle_unknown="use_encoded_value", unknown_value=-1
-            )
-        else:
-            raise ValueError(f"Unknown encoding: {encoding}")
-        categorical = Pipeline(
-            [
-                (
-                    "imputer",
-                    SimpleImputer(missing_values=None, strategy="most_frequent"),
-                ),
-                ("encoder", encoder),
-            ]
-        )
-        return ColumnTransformer(
-            [
-                ("numeric", numeric, numeric_columns),
-                ("categorical", categorical, categorical_columns),
-            ]
-        )
-
+def _():
+    from features import make_features, make_preprocess
     return make_features, make_preprocess
 
 
@@ -310,11 +242,8 @@ def _(accuracy_score, clone, np, pl, tqdm):
                 model.set_params(**params[model_name])
             result = fit_single_model(model_name, model, cv, X_train, y_train)
 
-            model.fit(X_train, y_train)
-
-            pred_val = model.predict(X_val)
-
-            result["val_acc"] = np.round(scorer_accuracy(y_val, pred_val), 4)
+            # No repeated evaluation on the previously viewed 20% holdout.
+            result["score_role"] = "exploratory_fixed_configuration_cv"
 
             results.append(result)
 
@@ -324,73 +253,9 @@ def _(accuracy_score, clone, np, pl, tqdm):
 
 
 @app.cell
-def _(SEED, optuna, pl, start_fits):
-    def start_optuna(
-        models,
-        param_distributions,
-        cv,
-        scoring,
-        X_train,
-        y_train,
-        random_state=SEED,
-        n_trials=100,
-        n_jobs=1,
-    ):
-        searches = {}
-        optuna_params = {name: {} for name in models}
-        for name, model in models.items():
-            print(f"Started Optuna for model: {name}", flush=True)
-            search = optuna.integration.OptunaSearchCV(
-                estimator=model,
-                param_distributions=param_distributions[name],
-                cv=cv,
-                verbose=0,
-                scoring=scoring,
-                n_trials=n_trials if param_distributions[name] else 1,
-                random_state=random_state,
-                n_jobs=n_jobs,
-            )
-
-            search.fit(X_train, y_train)
-            print(f"Ended Optuna for model: {name}", flush=True)
-
-            searches[name] = search
-
-            for param_name, param_value in search.best_params_.items():
-                optuna_params[name][param_name] = param_value
-
-        return optuna_params
-
-    def fit_optuna(
-        models,
-        param_distributions,
-        cv,
-        scoring,
-        X_train,
-        y_train,
-        X_val,
-        y_val,
-        random_state=SEED,
-        n_trials=100,
-        n_jobs=1,
-    ):
-        params = start_optuna(
-            models,
-            param_distributions,
-            cv,
-            scoring,
-            X_train,
-            y_train,
-            random_state,
-            n_trials,
-            n_jobs,
-        )
-        results = start_fits(models, params, cv, X_train, y_train, X_val, y_val)
-
-        results = results.with_columns(pl.lit("selection_cv").alias("score_role"))
-        return results, params
-
-    return (fit_optuna,)
+def _():
+    from evaluation import run_cv_experiment
+    return (run_cv_experiment,)
 
 
 @app.cell
@@ -413,7 +278,7 @@ def _(
         name,
         parameters=None,
         feature_set=FEATURE_SET,
-        score_role="fixed_configuration_cv",
+        score_role="exploratory_fixed_configuration_cv",
         extra=None,
     ):
         """Сохранить метрики, конфигурацию и точные разбиения завершённого запуска."""
@@ -491,7 +356,9 @@ def _(
             "model__alpha": optuna.distributions.FloatDistribution(1e-4, 200, log=True),
             "model__l1_ratio": optuna.distributions.FloatDistribution(0.0, 1.0),
         },
-        "LogisticRegression": {},
+        "LogisticRegression": {
+            "model__C": optuna.distributions.FloatDistribution(1e-3, 100, log=True),
+        },
     }
 
     models_lin = {
@@ -734,8 +601,10 @@ def _(
 
 
 @app.cell
-def _(X_train, X_val, cv, models_ens, start_fits, y_train, y_val):
-    res_ens = start_fits(models_ens, None, cv, X_train, y_train, X_val, y_val)
+def _(RUN_MODELS, X_train, X_val, cv, models_ens, start_fits, y_train, y_val):
+    res_ens = None
+    if RUN_MODELS:
+        res_ens = start_fits(models_ens, None, cv, X_train, y_train, X_val, y_val)
     res_ens
     return (res_ens,)
 
@@ -769,8 +638,7 @@ def _(
     )
     # Для первого поиска достаточно нескольких выбранных моделей.
     models_to_tune = [
-        "Ridge",
-        "KNeighborsClassifier",
+        "LogisticRegression",
         "RandomForestClassifier",
         "GradientBoostingClassifier",
     ]
@@ -810,51 +678,32 @@ def _(mo):
     mo.md(r"""
     ## Настройка параметров
 
-    Здесь сохранён первоначальный подход OptunaSearchCV. Его `cv_acc`
-    после выбора параметров оценивается на тех же фолдах и помечается
-    `selection_cv`. Это оптимистичная оценка подбора. Holdout в поиск не
-    передаётся; при многократном ручном выборе по нему он тоже становится
-    exploratory. Для независимой оценки всего поиска потребуется nested CV.
+    Optuna использует 3 внутренних фолда отдельно внутри каждого из 5
+    внешних фолдов. `inner_selection_accuracy` — оценка подбора;
+    `outer_accuracy_mean` — внешняя оценка всей процедуры. Preprocessing
+    обучается заново внутри каждого fit. Разделение 80/20 сохранено,
+    ранее просмотренный holdout не оценивается. Полный подбор выключен
+    по умолчанию; контролируемое сравнение с MLP находится в 05.
     """)
     return
 
 
 @app.cell
 def _(
-    N_TRIALS,
-    OPTUNA_SEARCH,
-    X_train,
-    X_val,
-    cv,
-    fit_optuna,
-    make_scorer,
-    models,
-    models_to_tune,
-    param_distributions,
-    save_experiments,
-    scorer_accuracy,
-    y_train,
-    y_val,
+    FEATURE_SET, N_TRIALS, OPTUNA_SEARCH, SEED, models, models_to_tune,
+    param_distributions, pl, results_path, run_cv_experiment, train_dataset,
 ):
     optuna_results = None
-    optuna_params = None
     if OPTUNA_SEARCH:
-        _selected = {name: models[name] for name in models_to_tune}
-        optuna_results, optuna_params = fit_optuna(
-            _selected,
-            param_distributions,
-            cv,
-            make_scorer(scorer_accuracy),
-            X_train,
-            y_train,
-            X_val,
-            y_val,
-            n_trials=N_TRIALS,
-            n_jobs=1,
+        _specs = {name: {
+            'kind': 'classical', 'estimator': models[name],
+            'distributions': param_distributions[name],
+        } for name in models_to_tune}
+        _run = run_cv_experiment(
+            train_dataset, _specs, results_path / 'nested_classical',
+            feature_set=FEATURE_SET, seed=SEED, n_trials=N_TRIALS,
         )
-        save_experiments(
-            optuna_results, "classical_optuna", optuna_params, score_role="selection_cv"
-        )
+        optuna_results = pl.DataFrame(_run['results'])
     optuna_results
     return (optuna_results,)
 
@@ -868,7 +717,7 @@ def _(mo):
 
 
 @app.cell
-def _(optuna_results, pl, results_default):
+def _(optuna_results, pl, res_ens, results_default):
     current_comparison = (
         pl.concat(
             [
@@ -876,6 +725,7 @@ def _(optuna_results, pl, results_default):
                 for _name, _table in [
                     ("default", results_default),
                     ("tuned", optuna_results),
+                    ("ensembles_default", res_ens)
                 ]
                 if _table is not None
             ],
@@ -884,7 +734,7 @@ def _(optuna_results, pl, results_default):
         if results_default is not None or optuna_results is not None
         else None
     )
-    current_comparison
+    current_comparison.drop(['cv_fold_scores', 'cv_val_indices'], strict=False) if current_comparison is not None else None
     return
 
 
