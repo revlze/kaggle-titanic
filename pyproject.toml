@@ -12,6 +12,7 @@ dependencies = [
     "lightgbm>=4.7.0",
     "marimo>=0.25.2",
     "numpy>=2.5.3",
+    "omegaconf>=2.4.0",
     "optuna>=5.0.0",
     "optuna-integration[sklearn]>=5.0.0",
     "polars>=1.44.2",
@@ -34,3 +35,7 @@ pythonpath = ["src"]
 [build-system]
 requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = ["data", "features", "models", "training", "utils", "evaluation"]
