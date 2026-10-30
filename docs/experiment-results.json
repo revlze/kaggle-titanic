@@ -1,0 +1,1674 @@
+{
+  "snapshot_date": "2026-10-30",
+  "metric": {
+    "name": "accuracy",
+    "direction": "higher_is_better",
+    "numeric_scale": "fraction",
+    "fold_sd_ddof": 0
+  },
+  "provenance": {
+    "local_results": "Copied from nine completed full local runs. Scores were checked against saved OOF CSVs; training was not rerun during this documentation update.",
+    "kaggle_results": "Transcribed from the user-provided output of kaggle competitions submissions -c titanic, supplied on 2026-10-30. Not independently fetched during this update.",
+    "association": "Local runs are associated by experiment description and the unique matching saved run. The description gb_v1_optuna 29oct is associated with gb_v1_optuna. Uploaded CSV bytes were not supplied or verified.",
+    "submission_timestamps": "Preserved exactly as supplied; no timezone is inferred.",
+    "artifact_availability": "artifacts/ is ignored by Git. This snapshot preserves selected configurations, reports, hashes and scores; models, full OOF CSVs and trial tables remain local."
+  },
+  "common_protocol": {
+    "seed": 1027309,
+    "feature_set": "base_title_family",
+    "development_fraction": 0.8,
+    "labeled_rows": 891,
+    "development_rows": 712,
+    "excluded_previously_viewed_holdout_rows": 179,
+    "submission_rows": 418,
+    "outer_folds": 5,
+    "tuned_inner_folds": 3,
+    "dataframe_sha256": "8331e5a2532f5fdb66153a8fc053df08a7dc9d2584f246c7fb1752f0a7139ca5",
+    "test_dataframe_sha256": "7aef8fe23a77833e2f72f9b55a027b133d508d3f8e3bb5929944e384f619cfb2",
+    "split_indices_sha256": "888ec6b0a4102729af375a1f448a5aac06914d82141bc772f481630cd19553f8",
+    "comparison_check": "Exact equality of data hash, feature set, seed, development/holdout indices and outer split identities across all nine runs."
+  },
+  "kaggle_submissions": [
+    {
+      "ref": 57798445,
+      "file_name": "submission.csv",
+      "date_as_reported": "2026-10-30 07:57:07.790000",
+      "description": "lgbm_1_tuned",
+      "status": "COMPLETE",
+      "public_accuracy": 0.76076,
+      "private_accuracy": null,
+      "matched_local_experiment": "lgbm_1_tuned"
+    },
+    {
+      "ref": 57797886,
+      "file_name": "submission.csv",
+      "date_as_reported": "2026-10-30 07:38:36.543000",
+      "description": "xgb_1_tuned",
+      "status": "COMPLETE",
+      "public_accuracy": 0.75837,
+      "private_accuracy": null,
+      "matched_local_experiment": "xgb_1_tuned"
+    },
+    {
+      "ref": 57797655,
+      "file_name": "submission.csv",
+      "date_as_reported": "2026-10-30 07:32:17.703000",
+      "description": "xgb_5seeds_tuned",
+      "status": "COMPLETE",
+      "public_accuracy": 0.75598,
+      "private_accuracy": null,
+      "matched_local_experiment": "xgb_5seeds_tuned"
+    },
+    {
+      "ref": 57764463,
+      "file_name": "submission.csv",
+      "date_as_reported": "2026-10-29 08:13:10.070000",
+      "description": "lr_v1_tuned",
+      "status": "COMPLETE",
+      "public_accuracy": 0.77272,
+      "private_accuracy": null,
+      "matched_local_experiment": "lr_v1_tuned"
+    },
+    {
+      "ref": 57764134,
+      "file_name": "submission.csv",
+      "date_as_reported": "2026-10-29 08:00:46.317000",
+      "description": "gb_v1",
+      "status": "COMPLETE",
+      "public_accuracy": 0.76076,
+      "private_accuracy": null,
+      "matched_local_experiment": "gb_v1"
+    },
+    {
+      "ref": 57764095,
+      "file_name": "submission.csv",
+      "date_as_reported": "2026-10-29 07:59:23.090000",
+      "description": "lr_v1",
+      "status": "COMPLETE",
+      "public_accuracy": 0.77272,
+      "private_accuracy": null,
+      "matched_local_experiment": "lr_v1"
+    },
+    {
+      "ref": 57760541,
+      "file_name": "submission.csv",
+      "date_as_reported": "2026-10-29 05:51:48.140000",
+      "description": "gb_v1_optuna 29oct",
+      "status": "COMPLETE",
+      "public_accuracy": 0.75837,
+      "private_accuracy": null,
+      "matched_local_experiment": "gb_v1_optuna"
+    }
+  ],
+  "runs": [
+    {
+      "experiment": "lr_v1",
+      "run_id": "20261029T075746_383922Z",
+      "local_artifact_directory": "artifacts/lr_v1/20261029T075746_383922Z",
+      "status": "complete",
+      "run_kind": "full",
+      "model": "LogisticRegression",
+      "ensemble": {
+        "n_models": 1,
+        "method": "single"
+      },
+      "configuration": {
+        "base": {
+          "exp_name": "lr_v1",
+          "seed": 1027309,
+          "run_kind": "full"
+        },
+        "run": {
+          "mode": "full",
+          "model_path": null
+        },
+        "data": {
+          "train_path": "data/titanic/train.csv",
+          "test_path": "data/titanic/test.csv"
+        },
+        "features": {
+          "feature_set": "base_title_family"
+        },
+        "preprocessing": {
+          "encoding": "onehot",
+          "scale": true
+        },
+        "model": {
+          "name": "LogisticRegression",
+          "params": {
+            "C": 1.0,
+            "max_iter": 2000,
+            "random_state": 1027309
+          }
+        },
+        "validation": {
+          "development_size": 0.8,
+          "n_splits": 5,
+          "inner_splits": 3
+        },
+        "tuning": {
+          "enabled": false,
+          "n_trials": 60,
+          "search_space": {
+            "loss": {
+              "type": "categorical",
+              "choices": [
+                "log_loss",
+                "exponential"
+              ]
+            },
+            "learning_rate": {
+              "type": "float",
+              "low": 0.0001,
+              "high": 0.1
+            },
+            "n_estimators": {
+              "type": "int",
+              "low": 10,
+              "high": 200
+            },
+            "min_samples_split": {
+              "type": "int",
+              "low": 2,
+              "high": 50
+            },
+            "min_samples_leaf": {
+              "type": "int",
+              "low": 1,
+              "high": 50
+            },
+            "max_depth": {
+              "type": "int",
+              "low": 1,
+              "high": 10
+            }
+          }
+        },
+        "metric": {
+          "name": "accuracy"
+        },
+        "output": {
+          "dir": "artifacts"
+        },
+        "comparison": {
+          "runs": []
+        }
+      },
+      "evaluation": {
+        "method": "fixed_cv",
+        "outer_folds": 5,
+        "inner_folds": 0,
+        "trials_per_search": 0,
+        "completed_searches": 0,
+        "cv_accuracy_mean": 0.8272037821333595,
+        "cv_accuracy_sd": 0.021473370196121982,
+        "oof_accuracy": 0.827247191011236,
+        "fold_accuracies": [
+          0.8321678321678322,
+          0.8531468531468531,
+          0.8098591549295775,
+          0.795774647887324,
+          0.8450704225352113
+        ]
+      },
+      "final_training": {
+        "selection_score_role": "fixed_parameters",
+        "selection_cv_accuracy": null,
+        "fit_rows": 891,
+        "parameters": {
+          "C": 1.0,
+          "max_iter": 2000,
+          "random_state": 1027309
+        },
+        "checkpoint_predictions_verified_in_saved_report": true
+      },
+      "submission": {
+        "rows": 418,
+        "local_csv_sha256": "4a845d33239a50bce47194aeeb2567b007fd7cd376acc7a3825f63aced633795",
+        "kaggle_ref": 57764095
+      },
+      "versions": {
+        "numpy": "2.5.4",
+        "polars": "2.0.0",
+        "scikit-learn": "1.9.1",
+        "torch": "2.14.1",
+        "optuna": "5.0.0",
+        "optuna-integration": "5.0.0",
+        "joblib": "1.6.0",
+        "matplotlib": "3.11.2",
+        "marimo": "0.25.2",
+        "omegaconf": "2.4.0"
+      },
+      "source_sha256": {
+        "run.py": "301a77740da75955c061e8dfd5ba414f33308f479e1a0f959230519e3c32314c",
+        "src/models.py": "156393276908319f0635e3c1e43ed170980a33d2b53a48a00538c3db8850930c",
+        "src/evaluation.py": "9d0ad69a2e141fa0a378208592831f8e6345ec8b53f72f0686d01e15996c0ea1",
+        "src/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "src/features.py": "9a33ecc26b3d84395c1b6bd0eb4b1efd0fe00bb233ac5fd20ad86bffb4768ba9",
+        "src/utils.py": "cb64182fff26e11a50f4b127af6ca2133d1cb26ec8ad565ee6c20aba3a740c7a",
+        "src/training.py": "761a7900e2c178292a42dc73982ea390a7196bf5f7da85a0d0cf5f98c06f558b",
+        "src/data.py": "d414b70496323e1539816033c3f4ff152a2560452c3be0c2409e0007baba91d4"
+      },
+      "evidence_files": [
+        "config.yaml",
+        "manifest.json",
+        "metrics.json",
+        "evaluation/results.json",
+        "evaluation/oof.csv",
+        "training.json",
+        "submission.csv",
+        "inference.json"
+      ]
+    },
+    {
+      "experiment": "lr_v1_tuned",
+      "run_id": "20261029T081116_571264Z",
+      "local_artifact_directory": "artifacts/lr_v1_tuned/20261029T081116_571264Z",
+      "status": "complete",
+      "run_kind": "full",
+      "model": "LogisticRegression",
+      "ensemble": {
+        "n_models": 1,
+        "method": "single"
+      },
+      "configuration": {
+        "base": {
+          "exp_name": "lr_v1_tuned",
+          "seed": 1027309,
+          "run_kind": "full"
+        },
+        "run": {
+          "mode": "full",
+          "model_path": null
+        },
+        "data": {
+          "train_path": "data/titanic/train.csv",
+          "test_path": "data/titanic/test.csv"
+        },
+        "features": {
+          "feature_set": "base_title_family"
+        },
+        "preprocessing": {
+          "encoding": "onehot",
+          "scale": true
+        },
+        "model": {
+          "name": "LogisticRegression",
+          "params": {
+            "C": 1.0,
+            "max_iter": 2000,
+            "random_state": 1027309
+          }
+        },
+        "validation": {
+          "development_size": 0.8,
+          "n_splits": 5,
+          "inner_splits": 3
+        },
+        "tuning": {
+          "enabled": true,
+          "n_trials": 60,
+          "search_space": {
+            "C": {
+              "type": "float",
+              "low": 0.001,
+              "high": 100,
+              "log": true
+            }
+          }
+        },
+        "metric": {
+          "name": "accuracy"
+        },
+        "output": {
+          "dir": "artifacts"
+        },
+        "comparison": {
+          "runs": []
+        }
+      },
+      "evaluation": {
+        "method": "nested_cv",
+        "outer_folds": 5,
+        "inner_folds": 3,
+        "trials_per_search": 60,
+        "completed_searches": 6,
+        "cv_accuracy_mean": 0.8229981286319313,
+        "cv_accuracy_sd": 0.024372134131168115,
+        "oof_accuracy": 0.8230337078651685,
+        "fold_accuracies": [
+          0.8251748251748252,
+          0.8461538461538461,
+          0.8028169014084507,
+          0.7887323943661971,
+          0.852112676056338
+        ]
+      },
+      "final_training": {
+        "selection_score_role": "development_selection_cv",
+        "selection_cv_accuracy": 0.8314481910907823,
+        "fit_rows": 891,
+        "parameters": {
+          "C": 5.666103172383384,
+          "max_iter": 2000,
+          "random_state": 1027309
+        },
+        "checkpoint_predictions_verified_in_saved_report": true
+      },
+      "submission": {
+        "rows": 418,
+        "local_csv_sha256": "ec086d7a5df1c0f1264a229ac102b4bf88b4cffaa3d194664d5daf1aea1e4712",
+        "kaggle_ref": 57764463
+      },
+      "versions": {
+        "numpy": "2.5.4",
+        "polars": "2.0.0",
+        "scikit-learn": "1.9.1",
+        "torch": "2.14.1",
+        "optuna": "5.0.0",
+        "optuna-integration": "5.0.0",
+        "joblib": "1.6.0",
+        "matplotlib": "3.11.2",
+        "marimo": "0.25.2",
+        "omegaconf": "2.4.0"
+      },
+      "source_sha256": {
+        "run.py": "301a77740da75955c061e8dfd5ba414f33308f479e1a0f959230519e3c32314c",
+        "src/models.py": "156393276908319f0635e3c1e43ed170980a33d2b53a48a00538c3db8850930c",
+        "src/evaluation.py": "9d0ad69a2e141fa0a378208592831f8e6345ec8b53f72f0686d01e15996c0ea1",
+        "src/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "src/features.py": "9a33ecc26b3d84395c1b6bd0eb4b1efd0fe00bb233ac5fd20ad86bffb4768ba9",
+        "src/utils.py": "cb64182fff26e11a50f4b127af6ca2133d1cb26ec8ad565ee6c20aba3a740c7a",
+        "src/training.py": "761a7900e2c178292a42dc73982ea390a7196bf5f7da85a0d0cf5f98c06f558b",
+        "src/data.py": "d414b70496323e1539816033c3f4ff152a2560452c3be0c2409e0007baba91d4"
+      },
+      "evidence_files": [
+        "config.yaml",
+        "manifest.json",
+        "metrics.json",
+        "evaluation/results.json",
+        "evaluation/oof.csv",
+        "training.json",
+        "submission.csv",
+        "inference.json"
+      ]
+    },
+    {
+      "experiment": "gb_v1",
+      "run_id": "20261029T054427_429190Z",
+      "local_artifact_directory": "artifacts/gb_v1/20261029T054427_429190Z",
+      "status": "complete",
+      "run_kind": "full",
+      "model": "GradientBoostingClassifier",
+      "ensemble": {
+        "n_models": 1,
+        "method": "single"
+      },
+      "configuration": {
+        "base": {
+          "exp_name": "gb_v1",
+          "seed": 1027309,
+          "run_kind": "full"
+        },
+        "run": {
+          "mode": "full",
+          "model_path": null
+        },
+        "data": {
+          "train_path": "data/titanic/train.csv",
+          "test_path": "data/titanic/test.csv"
+        },
+        "features": {
+          "feature_set": "base_title_family"
+        },
+        "preprocessing": {
+          "encoding": "onehot",
+          "scale": false
+        },
+        "model": {
+          "name": "GradientBoostingClassifier",
+          "params": {
+            "loss": "log_loss",
+            "n_estimators": 100,
+            "learning_rate": 0.1,
+            "max_depth": 3,
+            "random_state": 1027309
+          }
+        },
+        "validation": {
+          "development_size": 0.8,
+          "n_splits": 5,
+          "inner_splits": 3
+        },
+        "tuning": {
+          "enabled": false,
+          "n_trials": 20,
+          "search_space": {
+            "loss": {
+              "type": "categorical",
+              "choices": [
+                "log_loss",
+                "exponential"
+              ]
+            },
+            "learning_rate": {
+              "type": "float",
+              "low": 0.0001,
+              "high": 0.1
+            },
+            "n_estimators": {
+              "type": "int",
+              "low": 10,
+              "high": 200
+            },
+            "min_samples_split": {
+              "type": "int",
+              "low": 2,
+              "high": 50
+            },
+            "min_samples_leaf": {
+              "type": "int",
+              "low": 1,
+              "high": 50
+            },
+            "max_depth": {
+              "type": "int",
+              "low": 1,
+              "high": 10
+            }
+          }
+        },
+        "metric": {
+          "name": "accuracy"
+        },
+        "output": {
+          "dir": "artifacts"
+        },
+        "comparison": {
+          "runs": []
+        }
+      },
+      "evaluation": {
+        "method": "fixed_cv",
+        "outer_folds": 5,
+        "inner_folds": 0,
+        "trials_per_search": 0,
+        "completed_searches": 0,
+        "cv_accuracy_mean": 0.8286417807544568,
+        "cv_accuracy_sd": 0.0170738955868513,
+        "oof_accuracy": 0.8286516853932584,
+        "fold_accuracies": [
+          0.8461538461538461,
+          0.8181818181818182,
+          0.8098591549295775,
+          0.8169014084507042,
+          0.852112676056338
+        ]
+      },
+      "final_training": {
+        "selection_score_role": "fixed_parameters",
+        "selection_cv_accuracy": null,
+        "fit_rows": 891,
+        "parameters": {
+          "learning_rate": 0.1,
+          "loss": "log_loss",
+          "max_depth": 3,
+          "n_estimators": 100,
+          "random_state": 1027309
+        },
+        "checkpoint_predictions_verified_in_saved_report": true
+      },
+      "submission": {
+        "rows": 418,
+        "local_csv_sha256": "92204bf2c82d9340f1d82e75d650d4559abeed426595eca1910e9ffde0789558",
+        "kaggle_ref": 57764134
+      },
+      "versions": {
+        "numpy": "2.5.4",
+        "polars": "2.0.0",
+        "scikit-learn": "1.9.1",
+        "torch": "2.14.1",
+        "optuna": "5.0.0",
+        "optuna-integration": "5.0.0",
+        "joblib": "1.6.0",
+        "matplotlib": "3.11.2",
+        "marimo": "0.25.2",
+        "omegaconf": "2.4.0"
+      },
+      "source_sha256": {
+        "run.py": "b3696d46171d499cc9bc1b2b049c3cb54acce06c89dda62de0791c2ba5b248a1",
+        "src/models.py": "156393276908319f0635e3c1e43ed170980a33d2b53a48a00538c3db8850930c",
+        "src/evaluation.py": "5e9b4c0c641942166c2261027b1661fc51d00830f47a00980b86622810780dee",
+        "src/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "src/features.py": "9a33ecc26b3d84395c1b6bd0eb4b1efd0fe00bb233ac5fd20ad86bffb4768ba9",
+        "src/utils.py": "cb64182fff26e11a50f4b127af6ca2133d1cb26ec8ad565ee6c20aba3a740c7a",
+        "src/training.py": "e9f8ff4b574cca8c9c054b99f899926218d1f01dc365798a2f9a261f1729fd6a",
+        "src/data.py": "d414b70496323e1539816033c3f4ff152a2560452c3be0c2409e0007baba91d4"
+      },
+      "evidence_files": [
+        "config.yaml",
+        "manifest.json",
+        "metrics.json",
+        "evaluation/results.json",
+        "evaluation/oof.csv",
+        "training.json",
+        "submission.csv",
+        "inference.json"
+      ]
+    },
+    {
+      "experiment": "gb_v1_optuna",
+      "run_id": "20261029T054822_685707Z",
+      "local_artifact_directory": "artifacts/gb_v1_optuna/20261029T054822_685707Z",
+      "status": "complete",
+      "run_kind": "full",
+      "model": "GradientBoostingClassifier",
+      "ensemble": {
+        "n_models": 1,
+        "method": "single"
+      },
+      "configuration": {
+        "base": {
+          "exp_name": "gb_v1_optuna",
+          "seed": 1027309,
+          "run_kind": "full"
+        },
+        "run": {
+          "mode": "full",
+          "model_path": null
+        },
+        "data": {
+          "train_path": "data/titanic/train.csv",
+          "test_path": "data/titanic/test.csv"
+        },
+        "features": {
+          "feature_set": "base_title_family"
+        },
+        "preprocessing": {
+          "encoding": "onehot",
+          "scale": false
+        },
+        "model": {
+          "name": "GradientBoostingClassifier",
+          "params": {
+            "loss": "log_loss",
+            "n_estimators": 100,
+            "learning_rate": 0.1,
+            "max_depth": 3,
+            "random_state": 1027309
+          }
+        },
+        "validation": {
+          "development_size": 0.8,
+          "n_splits": 5,
+          "inner_splits": 3
+        },
+        "tuning": {
+          "enabled": true,
+          "n_trials": 20,
+          "search_space": {
+            "loss": {
+              "type": "categorical",
+              "choices": [
+                "log_loss",
+                "exponential"
+              ]
+            },
+            "learning_rate": {
+              "type": "float",
+              "low": 0.0001,
+              "high": 0.1
+            },
+            "n_estimators": {
+              "type": "int",
+              "low": 10,
+              "high": 200
+            },
+            "min_samples_split": {
+              "type": "int",
+              "low": 2,
+              "high": 50
+            },
+            "min_samples_leaf": {
+              "type": "int",
+              "low": 1,
+              "high": 50
+            },
+            "max_depth": {
+              "type": "int",
+              "low": 1,
+              "high": 10
+            }
+          }
+        },
+        "metric": {
+          "name": "accuracy"
+        },
+        "output": {
+          "dir": "artifacts"
+        },
+        "comparison": {
+          "runs": []
+        }
+      },
+      "evaluation": {
+        "method": "nested_cv",
+        "outer_folds": 5,
+        "inner_folds": 3,
+        "trials_per_search": 20,
+        "completed_searches": 6,
+        "cv_accuracy_mean": 0.8300009849305624,
+        "cv_accuracy_sd": 0.020995822807617318,
+        "oof_accuracy": 0.8300561797752809,
+        "fold_accuracies": [
+          0.8531468531468531,
+          0.8461538461538461,
+          0.8169014084507042,
+          0.795774647887324,
+          0.8380281690140845
+        ]
+      },
+      "final_training": {
+        "selection_score_role": "development_selection_cv",
+        "selection_cv_accuracy": 0.8398811001193728,
+        "fit_rows": 891,
+        "parameters": {
+          "learning_rate": 0.04739436074199326,
+          "loss": "exponential",
+          "max_depth": 10,
+          "min_samples_leaf": 8,
+          "min_samples_split": 35,
+          "n_estimators": 157,
+          "random_state": 1027309
+        },
+        "checkpoint_predictions_verified_in_saved_report": true
+      },
+      "submission": {
+        "rows": 418,
+        "local_csv_sha256": "3b40280035c07a0d3eb1598210a75bbab52f2f6b550906b950fcba045f6577b5",
+        "kaggle_ref": 57760541
+      },
+      "versions": {
+        "numpy": "2.5.4",
+        "polars": "2.0.0",
+        "scikit-learn": "1.9.1",
+        "torch": "2.14.1",
+        "optuna": "5.0.0",
+        "optuna-integration": "5.0.0",
+        "joblib": "1.6.0",
+        "matplotlib": "3.11.2",
+        "marimo": "0.25.2",
+        "omegaconf": "2.4.0"
+      },
+      "source_sha256": {
+        "run.py": "b3696d46171d499cc9bc1b2b049c3cb54acce06c89dda62de0791c2ba5b248a1",
+        "src/models.py": "156393276908319f0635e3c1e43ed170980a33d2b53a48a00538c3db8850930c",
+        "src/evaluation.py": "5e9b4c0c641942166c2261027b1661fc51d00830f47a00980b86622810780dee",
+        "src/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "src/features.py": "9a33ecc26b3d84395c1b6bd0eb4b1efd0fe00bb233ac5fd20ad86bffb4768ba9",
+        "src/utils.py": "cb64182fff26e11a50f4b127af6ca2133d1cb26ec8ad565ee6c20aba3a740c7a",
+        "src/training.py": "e9f8ff4b574cca8c9c054b99f899926218d1f01dc365798a2f9a261f1729fd6a",
+        "src/data.py": "d414b70496323e1539816033c3f4ff152a2560452c3be0c2409e0007baba91d4"
+      },
+      "evidence_files": [
+        "config.yaml",
+        "manifest.json",
+        "metrics.json",
+        "evaluation/results.json",
+        "evaluation/oof.csv",
+        "training.json",
+        "submission.csv",
+        "inference.json"
+      ]
+    },
+    {
+      "experiment": "xgb_1_tuned",
+      "run_id": "20261030T073735_087383Z",
+      "local_artifact_directory": "artifacts/xgb_1_tuned/20261030T073735_087383Z",
+      "status": "complete",
+      "run_kind": "full",
+      "model": "XGBClassifier",
+      "ensemble": {
+        "n_models": 1,
+        "method": "single"
+      },
+      "configuration": {
+        "base": {
+          "exp_name": "xgb_1_tuned",
+          "seed": 1027309,
+          "run_kind": "full"
+        },
+        "run": {
+          "mode": "full",
+          "model_path": null
+        },
+        "data": {
+          "train_path": "data/titanic/train.csv",
+          "test_path": "data/titanic/test.csv"
+        },
+        "features": {
+          "feature_set": "base_title_family"
+        },
+        "preprocessing": {
+          "encoding": "onehot",
+          "scale": false
+        },
+        "model": {
+          "name": "XGBClassifier",
+          "params": {
+            "n_estimators": 300,
+            "learning_rate": 0.05,
+            "max_depth": 3,
+            "min_child_weight": 3,
+            "subsample": 0.8,
+            "colsample_bytree": 0.8,
+            "reg_lambda": 3.0,
+            "reg_alpha": 0.0,
+            "objective": "binary:logistic",
+            "eval_metric": "logloss",
+            "tree_method": "hist",
+            "device": "cpu",
+            "n_jobs": 4,
+            "random_state": 1027309
+          }
+        },
+        "ensemble": {
+          "n_models": 1,
+          "method": "soft",
+          "stacking_folds": 3,
+          "meta_model": {
+            "name": "LogisticRegression",
+            "params": {
+              "C": 1.0,
+              "max_iter": 2000
+            }
+          }
+        },
+        "validation": {
+          "development_size": 0.8,
+          "n_splits": 5,
+          "inner_splits": 3
+        },
+        "tuning": {
+          "enabled": true,
+          "n_trials": 60,
+          "search_space": {
+            "n_estimators": {
+              "type": "int",
+              "low": 100,
+              "high": 500,
+              "step": 50
+            },
+            "learning_rate": {
+              "type": "float",
+              "low": 0.02,
+              "high": 0.1,
+              "log": true
+            },
+            "max_depth": {
+              "type": "int",
+              "low": 2,
+              "high": 5
+            },
+            "min_child_weight": {
+              "type": "int",
+              "low": 1,
+              "high": 10
+            },
+            "subsample": {
+              "type": "float",
+              "low": 0.7,
+              "high": 1.0
+            },
+            "colsample_bytree": {
+              "type": "float",
+              "low": 0.7,
+              "high": 1.0
+            },
+            "reg_lambda": {
+              "type": "float",
+              "low": 1.0,
+              "high": 10.0,
+              "log": true
+            }
+          }
+        },
+        "metric": {
+          "name": "accuracy"
+        },
+        "output": {
+          "dir": "artifacts"
+        },
+        "comparison": {
+          "runs": []
+        }
+      },
+      "evaluation": {
+        "method": "nested_cv",
+        "outer_folds": 5,
+        "inner_folds": 3,
+        "trials_per_search": 60,
+        "completed_searches": 6,
+        "cv_accuracy_mean": 0.8356446370530877,
+        "cv_accuracy_sd": 0.03240034739872688,
+        "oof_accuracy": 0.8356741573033708,
+        "fold_accuracies": [
+          0.8671328671328671,
+          0.8251748251748252,
+          0.8028169014084507,
+          0.8028169014084507,
+          0.8802816901408451
+        ]
+      },
+      "final_training": {
+        "selection_score_role": "development_selection_cv",
+        "selection_cv_accuracy": 0.8468839012398209,
+        "fit_rows": 891,
+        "parameters": {
+          "objective": "binary:logistic",
+          "colsample_bytree": 0.7487718655507349,
+          "device": "cpu",
+          "eval_metric": "logloss",
+          "learning_rate": 0.0719916158092595,
+          "max_depth": 5,
+          "min_child_weight": 5,
+          "n_estimators": 250,
+          "n_jobs": 4,
+          "random_state": 1027309,
+          "reg_alpha": 0.0,
+          "reg_lambda": 6.220224494448729,
+          "subsample": 0.9849652294565315,
+          "tree_method": "hist"
+        },
+        "checkpoint_predictions_verified_in_saved_report": true
+      },
+      "submission": {
+        "rows": 418,
+        "local_csv_sha256": "ff68ba4275970cb11b37c614625adeb7a56e806751cbcade15ff35b85789449c",
+        "kaggle_ref": 57797886
+      },
+      "versions": {
+        "numpy": "2.5.4",
+        "polars": "2.0.0",
+        "scikit-learn": "1.9.1",
+        "torch": "2.14.1",
+        "optuna": "5.0.0",
+        "optuna-integration": "5.0.0",
+        "joblib": "1.6.0",
+        "matplotlib": "3.11.2",
+        "marimo": "0.25.2",
+        "omegaconf": "2.4.0",
+        "catboost": "1.2.10",
+        "xgboost": "3.4.1"
+      },
+      "source_sha256": {
+        "run.py": "9fa00ede150579a1911ac770a4447cf60a4c1b670a23ea97ef141b42e30643fd",
+        "src/models.py": "156393276908319f0635e3c1e43ed170980a33d2b53a48a00538c3db8850930c",
+        "src/evaluation.py": "15e7e9c71a30af3db52ee75e96a19da4574b7ff2c21de45522d377402303ad9b",
+        "src/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "src/features.py": "9a33ecc26b3d84395c1b6bd0eb4b1efd0fe00bb233ac5fd20ad86bffb4768ba9",
+        "src/utils.py": "6a7728c5800addd537adf76d1783599f02d386d37a49f55d6a21ede63af58c79",
+        "src/training.py": "47e85f13481e4fac5c7154f93223d4799b2d7551d585f0ce576a905696bfed00",
+        "src/data.py": "d414b70496323e1539816033c3f4ff152a2560452c3be0c2409e0007baba91d4"
+      },
+      "evidence_files": [
+        "config.yaml",
+        "manifest.json",
+        "metrics.json",
+        "evaluation/results.json",
+        "evaluation/oof.csv",
+        "training.json",
+        "submission.csv",
+        "inference.json"
+      ]
+    },
+    {
+      "experiment": "xgb_5seeds_tuned",
+      "run_id": "20261030T072714_855205Z",
+      "local_artifact_directory": "artifacts/xgb_5seeds_tuned/20261030T072714_855205Z",
+      "status": "complete",
+      "run_kind": "full",
+      "model": "XGBClassifier",
+      "ensemble": {
+        "n_models": 5,
+        "method": "soft",
+        "aggregation": "mean_probability",
+        "random_states": [
+          32550037,
+          1588378770,
+          2031717221,
+          205482616,
+          1409070186
+        ]
+      },
+      "configuration": {
+        "base": {
+          "exp_name": "xgb_5seeds_tuned",
+          "seed": 1027309,
+          "run_kind": "full"
+        },
+        "run": {
+          "mode": "full",
+          "model_path": null
+        },
+        "data": {
+          "train_path": "data/titanic/train.csv",
+          "test_path": "data/titanic/test.csv"
+        },
+        "features": {
+          "feature_set": "base_title_family"
+        },
+        "preprocessing": {
+          "encoding": "onehot",
+          "scale": false
+        },
+        "model": {
+          "name": "XGBClassifier",
+          "params": {
+            "n_estimators": 300,
+            "learning_rate": 0.05,
+            "max_depth": 3,
+            "min_child_weight": 3,
+            "subsample": 0.8,
+            "colsample_bytree": 0.8,
+            "reg_lambda": 3.0,
+            "reg_alpha": 0.0,
+            "objective": "binary:logistic",
+            "eval_metric": "logloss",
+            "tree_method": "hist",
+            "device": "cpu",
+            "n_jobs": 4,
+            "random_state": 1027309
+          }
+        },
+        "ensemble": {
+          "n_models": 5,
+          "method": "soft",
+          "stacking_folds": 3,
+          "meta_model": {
+            "name": "LogisticRegression",
+            "params": {
+              "C": 1.0,
+              "max_iter": 2000
+            }
+          }
+        },
+        "validation": {
+          "development_size": 0.8,
+          "n_splits": 5,
+          "inner_splits": 3
+        },
+        "tuning": {
+          "enabled": true,
+          "n_trials": 60,
+          "search_space": {
+            "n_estimators": {
+              "type": "int",
+              "low": 100,
+              "high": 500,
+              "step": 50
+            },
+            "learning_rate": {
+              "type": "float",
+              "low": 0.02,
+              "high": 0.1,
+              "log": true
+            },
+            "max_depth": {
+              "type": "int",
+              "low": 2,
+              "high": 5
+            },
+            "min_child_weight": {
+              "type": "int",
+              "low": 1,
+              "high": 10
+            },
+            "subsample": {
+              "type": "float",
+              "low": 0.7,
+              "high": 1.0
+            },
+            "colsample_bytree": {
+              "type": "float",
+              "low": 0.7,
+              "high": 1.0
+            },
+            "reg_lambda": {
+              "type": "float",
+              "low": 1.0,
+              "high": 10.0,
+              "log": true
+            }
+          }
+        },
+        "metric": {
+          "name": "accuracy"
+        },
+        "output": {
+          "dir": "artifacts"
+        },
+        "comparison": {
+          "runs": []
+        }
+      },
+      "evaluation": {
+        "method": "nested_cv",
+        "outer_folds": 5,
+        "inner_folds": 3,
+        "trials_per_search": 60,
+        "completed_searches": 6,
+        "cv_accuracy_mean": 0.8286516300600807,
+        "cv_accuracy_sd": 0.02618051410933921,
+        "oof_accuracy": 0.8286516853932584,
+        "fold_accuracies": [
+          0.8391608391608392,
+          0.8181818181818182,
+          0.8169014084507042,
+          0.795774647887324,
+          0.8732394366197183
+        ]
+      },
+      "final_training": {
+        "selection_score_role": "development_selection_cv",
+        "selection_cv_accuracy": 0.8426644919571205,
+        "fit_rows": 891,
+        "parameters": {
+          "objective": "binary:logistic",
+          "colsample_bytree": 0.8191214702554769,
+          "device": "cpu",
+          "eval_metric": "logloss",
+          "learning_rate": 0.04542996855669837,
+          "max_depth": 4,
+          "min_child_weight": 4,
+          "n_estimators": 400,
+          "n_jobs": 4,
+          "reg_alpha": 0.0,
+          "reg_lambda": 7.738357310771322,
+          "subsample": 0.9667733366949322,
+          "tree_method": "hist"
+        },
+        "checkpoint_predictions_verified_in_saved_report": true
+      },
+      "submission": {
+        "rows": 418,
+        "local_csv_sha256": "04f73ea1f6a3199f8a99574141f33cf75d324d83f6319c9e71a837412b418e96",
+        "kaggle_ref": 57797655
+      },
+      "versions": {
+        "numpy": "2.5.4",
+        "polars": "2.0.0",
+        "scikit-learn": "1.9.1",
+        "torch": "2.14.1",
+        "optuna": "5.0.0",
+        "optuna-integration": "5.0.0",
+        "joblib": "1.6.0",
+        "matplotlib": "3.11.2",
+        "marimo": "0.25.2",
+        "omegaconf": "2.4.0",
+        "catboost": "1.2.10",
+        "xgboost": "3.4.1"
+      },
+      "source_sha256": {
+        "run.py": "9fa00ede150579a1911ac770a4447cf60a4c1b670a23ea97ef141b42e30643fd",
+        "src/models.py": "156393276908319f0635e3c1e43ed170980a33d2b53a48a00538c3db8850930c",
+        "src/evaluation.py": "15e7e9c71a30af3db52ee75e96a19da4574b7ff2c21de45522d377402303ad9b",
+        "src/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "src/features.py": "9a33ecc26b3d84395c1b6bd0eb4b1efd0fe00bb233ac5fd20ad86bffb4768ba9",
+        "src/utils.py": "6a7728c5800addd537adf76d1783599f02d386d37a49f55d6a21ede63af58c79",
+        "src/training.py": "47e85f13481e4fac5c7154f93223d4799b2d7551d585f0ce576a905696bfed00",
+        "src/data.py": "d414b70496323e1539816033c3f4ff152a2560452c3be0c2409e0007baba91d4"
+      },
+      "evidence_files": [
+        "config.yaml",
+        "manifest.json",
+        "metrics.json",
+        "evaluation/results.json",
+        "evaluation/oof.csv",
+        "training.json",
+        "submission.csv",
+        "inference.json"
+      ]
+    },
+    {
+      "experiment": "lgbm_1_tuned",
+      "run_id": "20261030T075559_571494Z",
+      "local_artifact_directory": "artifacts/lgbm_1_tuned/20261030T075559_571494Z",
+      "status": "complete",
+      "run_kind": "full",
+      "model": "LGBMClassifier",
+      "ensemble": {
+        "n_models": 1,
+        "method": "single"
+      },
+      "configuration": {
+        "base": {
+          "exp_name": "lgbm_1_tuned",
+          "seed": 1027309,
+          "run_kind": "full"
+        },
+        "run": {
+          "mode": "full",
+          "model_path": null
+        },
+        "data": {
+          "train_path": "data/titanic/train.csv",
+          "test_path": "data/titanic/test.csv"
+        },
+        "features": {
+          "feature_set": "base_title_family"
+        },
+        "preprocessing": {
+          "encoding": "onehot",
+          "scale": false
+        },
+        "model": {
+          "name": "LGBMClassifier",
+          "params": {
+            "n_estimators": 300,
+            "learning_rate": 0.05,
+            "num_leaves": 15,
+            "max_depth": 4,
+            "min_child_samples": 20,
+            "subsample": 0.8,
+            "subsample_freq": 1,
+            "colsample_bytree": 0.8,
+            "reg_lambda": 3.0,
+            "reg_alpha": 0.0,
+            "objective": "binary",
+            "metric": "binary_logloss",
+            "device_type": "cpu",
+            "deterministic": true,
+            "force_col_wise": true,
+            "verbosity": -1,
+            "n_jobs": 1,
+            "random_state": 1027309
+          }
+        },
+        "ensemble": {
+          "n_models": 1,
+          "method": "soft",
+          "stacking_folds": 3,
+          "meta_model": {
+            "name": "LogisticRegression",
+            "params": {
+              "C": 1.0,
+              "max_iter": 2000
+            }
+          }
+        },
+        "validation": {
+          "development_size": 0.8,
+          "n_splits": 5,
+          "inner_splits": 3
+        },
+        "tuning": {
+          "enabled": true,
+          "n_trials": 60,
+          "search_space": {
+            "n_estimators": {
+              "type": "int",
+              "low": 100,
+              "high": 500,
+              "step": 50
+            },
+            "learning_rate": {
+              "type": "float",
+              "low": 0.02,
+              "high": 0.1,
+              "log": true
+            },
+            "num_leaves": {
+              "type": "int",
+              "low": 4,
+              "high": 15
+            },
+            "min_child_samples": {
+              "type": "int",
+              "low": 10,
+              "high": 40
+            },
+            "subsample": {
+              "type": "float",
+              "low": 0.7,
+              "high": 1.0
+            },
+            "colsample_bytree": {
+              "type": "float",
+              "low": 0.7,
+              "high": 1.0
+            },
+            "reg_lambda": {
+              "type": "float",
+              "low": 1.0,
+              "high": 10.0,
+              "log": true
+            }
+          }
+        },
+        "metric": {
+          "name": "accuracy"
+        },
+        "output": {
+          "dir": "artifacts"
+        },
+        "comparison": {
+          "runs": []
+        }
+      },
+      "evaluation": {
+        "method": "nested_cv",
+        "outer_folds": 5,
+        "inner_folds": 3,
+        "trials_per_search": 60,
+        "completed_searches": 6,
+        "cv_accuracy_mean": 0.8258150300403821,
+        "cv_accuracy_sd": 0.02805354744365667,
+        "oof_accuracy": 0.8258426966292135,
+        "fold_accuracies": [
+          0.8601398601398601,
+          0.8111888111888111,
+          0.8028169014084507,
+          0.795774647887324,
+          0.8591549295774648
+        ]
+      },
+      "final_training": {
+        "selection_score_role": "development_selection_cv",
+        "selection_cv_accuracy": 0.8468839012398207,
+        "fit_rows": 891,
+        "parameters": {
+          "colsample_bytree": 0.7292783962864509,
+          "learning_rate": 0.08392419928885636,
+          "max_depth": 4,
+          "min_child_samples": 19,
+          "n_estimators": 250,
+          "n_jobs": 1,
+          "num_leaves": 14,
+          "objective": "binary",
+          "random_state": 1027309,
+          "reg_alpha": 0.0,
+          "reg_lambda": 6.790231097662054,
+          "subsample": 0.971185927303019,
+          "subsample_freq": 1,
+          "metric": "binary_logloss",
+          "device_type": "cpu",
+          "deterministic": true,
+          "force_col_wise": true,
+          "verbosity": -1
+        },
+        "checkpoint_predictions_verified_in_saved_report": true
+      },
+      "submission": {
+        "rows": 418,
+        "local_csv_sha256": "5a865688145c522793ba4f8878c70d6d48feedf43767536c3419c2746f550d34",
+        "kaggle_ref": 57798445
+      },
+      "versions": {
+        "numpy": "2.5.4",
+        "polars": "2.0.0",
+        "scikit-learn": "1.9.1",
+        "torch": "2.14.1",
+        "optuna": "5.0.0",
+        "optuna-integration": "5.0.0",
+        "joblib": "1.6.0",
+        "matplotlib": "3.11.2",
+        "marimo": "0.25.2",
+        "omegaconf": "2.4.0",
+        "catboost": "1.2.10",
+        "xgboost": "3.4.1",
+        "lightgbm": "4.7.0"
+      },
+      "source_sha256": {
+        "run.py": "97d0c4b525e8933fffed5762df8b7da96da6fbacc208f92c21fc71fb9d9618cd",
+        "src/models.py": "156393276908319f0635e3c1e43ed170980a33d2b53a48a00538c3db8850930c",
+        "src/evaluation.py": "15e7e9c71a30af3db52ee75e96a19da4574b7ff2c21de45522d377402303ad9b",
+        "src/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "src/features.py": "9a33ecc26b3d84395c1b6bd0eb4b1efd0fe00bb233ac5fd20ad86bffb4768ba9",
+        "src/utils.py": "eb7ccffc3768505d464e8f0e9ea8c8870de09e7f5e3cfd23e3652abe9981a65b",
+        "src/training.py": "47e85f13481e4fac5c7154f93223d4799b2d7551d585f0ce576a905696bfed00",
+        "src/data.py": "d414b70496323e1539816033c3f4ff152a2560452c3be0c2409e0007baba91d4"
+      },
+      "evidence_files": [
+        "config.yaml",
+        "manifest.json",
+        "metrics.json",
+        "evaluation/results.json",
+        "evaluation/oof.csv",
+        "training.json",
+        "submission.csv",
+        "inference.json"
+      ]
+    },
+    {
+      "experiment": "gb_optuna_50trials",
+      "run_id": "20261029T060848_617478Z",
+      "local_artifact_directory": "artifacts/gb_optuna_50trials/20261029T060848_617478Z",
+      "status": "complete",
+      "run_kind": "full",
+      "model": "GradientBoostingClassifier",
+      "ensemble": {
+        "n_models": 1,
+        "method": "single"
+      },
+      "configuration": {
+        "base": {
+          "exp_name": "gb_optuna_50trials",
+          "seed": 1027309,
+          "run_kind": "full"
+        },
+        "run": {
+          "mode": "full",
+          "model_path": null
+        },
+        "data": {
+          "train_path": "data/titanic/train.csv",
+          "test_path": "data/titanic/test.csv"
+        },
+        "features": {
+          "feature_set": "base_title_family"
+        },
+        "preprocessing": {
+          "encoding": "onehot",
+          "scale": false
+        },
+        "model": {
+          "name": "GradientBoostingClassifier",
+          "params": {
+            "loss": "log_loss",
+            "n_estimators": 100,
+            "learning_rate": 0.1,
+            "max_depth": 3,
+            "random_state": 1027309
+          }
+        },
+        "validation": {
+          "development_size": 0.8,
+          "n_splits": 5,
+          "inner_splits": 3
+        },
+        "tuning": {
+          "enabled": true,
+          "n_trials": 50,
+          "search_space": {
+            "loss": {
+              "type": "categorical",
+              "choices": [
+                "log_loss",
+                "exponential"
+              ]
+            },
+            "learning_rate": {
+              "type": "float",
+              "low": 0.0001,
+              "high": 0.1
+            },
+            "n_estimators": {
+              "type": "int",
+              "low": 10,
+              "high": 200
+            },
+            "min_samples_split": {
+              "type": "int",
+              "low": 2,
+              "high": 50
+            },
+            "min_samples_leaf": {
+              "type": "int",
+              "low": 1,
+              "high": 50
+            },
+            "max_depth": {
+              "type": "int",
+              "low": 1,
+              "high": 10
+            }
+          }
+        },
+        "metric": {
+          "name": "accuracy"
+        },
+        "output": {
+          "dir": "artifacts"
+        },
+        "comparison": {
+          "runs": []
+        }
+      },
+      "evaluation": {
+        "method": "nested_cv",
+        "outer_folds": 5,
+        "inner_folds": 3,
+        "trials_per_search": 50,
+        "completed_searches": 6,
+        "cv_accuracy_mean": 0.8356741849699597,
+        "cv_accuracy_sd": 0.032550940339560214,
+        "oof_accuracy": 0.8356741573033708,
+        "fold_accuracies": [
+          0.8601398601398601,
+          0.8111888111888111,
+          0.8169014084507042,
+          0.8028169014084507,
+          0.8873239436619719
+        ]
+      },
+      "final_training": {
+        "selection_score_role": "development_selection_cv",
+        "selection_cv_accuracy": 0.8412757508066516,
+        "fit_rows": 891,
+        "parameters": {
+          "learning_rate": 0.0644556891180683,
+          "loss": "exponential",
+          "max_depth": 5,
+          "min_samples_leaf": 17,
+          "min_samples_split": 47,
+          "n_estimators": 200,
+          "random_state": 1027309
+        },
+        "checkpoint_predictions_verified_in_saved_report": true
+      },
+      "submission": {
+        "rows": 418,
+        "local_csv_sha256": "43eea2eb5fcfa0a475a46bb76a21e03e438c899398d74e0adffaef6dfd16b833",
+        "kaggle_ref": null
+      },
+      "versions": {
+        "numpy": "2.5.4",
+        "polars": "2.0.0",
+        "scikit-learn": "1.9.1",
+        "torch": "2.14.1",
+        "optuna": "5.0.0",
+        "optuna-integration": "5.0.0",
+        "joblib": "1.6.0",
+        "matplotlib": "3.11.2",
+        "marimo": "0.25.2",
+        "omegaconf": "2.4.0"
+      },
+      "source_sha256": {
+        "run.py": "b3696d46171d499cc9bc1b2b049c3cb54acce06c89dda62de0791c2ba5b248a1",
+        "src/models.py": "156393276908319f0635e3c1e43ed170980a33d2b53a48a00538c3db8850930c",
+        "src/evaluation.py": "5e9b4c0c641942166c2261027b1661fc51d00830f47a00980b86622810780dee",
+        "src/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "src/features.py": "9a33ecc26b3d84395c1b6bd0eb4b1efd0fe00bb233ac5fd20ad86bffb4768ba9",
+        "src/utils.py": "cb64182fff26e11a50f4b127af6ca2133d1cb26ec8ad565ee6c20aba3a740c7a",
+        "src/training.py": "e9f8ff4b574cca8c9c054b99f899926218d1f01dc365798a2f9a261f1729fd6a",
+        "src/data.py": "d414b70496323e1539816033c3f4ff152a2560452c3be0c2409e0007baba91d4"
+      },
+      "evidence_files": [
+        "config.yaml",
+        "manifest.json",
+        "metrics.json",
+        "evaluation/results.json",
+        "evaluation/oof.csv",
+        "training.json",
+        "submission.csv",
+        "inference.json"
+      ]
+    },
+    {
+      "experiment": "gb_optuna_60trials",
+      "run_id": "20261029T070239_722427Z",
+      "local_artifact_directory": "artifacts/gb_optuna_60trials/20261029T070239_722427Z",
+      "status": "complete",
+      "run_kind": "full",
+      "model": "GradientBoostingClassifier",
+      "ensemble": {
+        "n_models": 1,
+        "method": "single"
+      },
+      "configuration": {
+        "base": {
+          "exp_name": "gb_optuna_60trials",
+          "seed": 1027309,
+          "run_kind": "full"
+        },
+        "run": {
+          "mode": "full",
+          "model_path": null
+        },
+        "data": {
+          "train_path": "data/titanic/train.csv",
+          "test_path": "data/titanic/test.csv"
+        },
+        "features": {
+          "feature_set": "base_title_family"
+        },
+        "preprocessing": {
+          "encoding": "onehot",
+          "scale": false
+        },
+        "model": {
+          "name": "GradientBoostingClassifier",
+          "params": {
+            "loss": "log_loss",
+            "n_estimators": 100,
+            "learning_rate": 0.1,
+            "max_depth": 3,
+            "random_state": 1027309
+          }
+        },
+        "validation": {
+          "development_size": 0.8,
+          "n_splits": 5,
+          "inner_splits": 3
+        },
+        "tuning": {
+          "enabled": true,
+          "n_trials": 60,
+          "search_space": {
+            "loss": {
+              "type": "categorical",
+              "choices": [
+                "log_loss",
+                "exponential"
+              ]
+            },
+            "learning_rate": {
+              "type": "float",
+              "low": 0.0001,
+              "high": 0.1
+            },
+            "n_estimators": {
+              "type": "int",
+              "low": 10,
+              "high": 200
+            },
+            "min_samples_split": {
+              "type": "int",
+              "low": 2,
+              "high": 50
+            },
+            "min_samples_leaf": {
+              "type": "int",
+              "low": 1,
+              "high": 50
+            },
+            "max_depth": {
+              "type": "int",
+              "low": 1,
+              "high": 10
+            }
+          }
+        },
+        "metric": {
+          "name": "accuracy"
+        },
+        "output": {
+          "dir": "artifacts"
+        },
+        "comparison": {
+          "runs": []
+        }
+      },
+      "evaluation": {
+        "method": "nested_cv",
+        "outer_folds": 5,
+        "inner_folds": 3,
+        "trials_per_search": 60,
+        "completed_searches": 6,
+        "cv_accuracy_mean": 0.8384910863784103,
+        "cv_accuracy_sd": 0.031393332571329424,
+        "oof_accuracy": 0.8384831460674157,
+        "fold_accuracies": [
+          0.8601398601398601,
+          0.8111888111888111,
+          0.8309859154929577,
+          0.8028169014084507,
+          0.8873239436619719
+        ]
+      },
+      "final_training": {
+        "selection_score_role": "development_selection_cv",
+        "selection_cv_accuracy": 0.842694039641173,
+        "fit_rows": 891,
+        "parameters": {
+          "learning_rate": 0.04791038145149004,
+          "loss": "exponential",
+          "max_depth": 5,
+          "min_samples_leaf": 18,
+          "min_samples_split": 36,
+          "n_estimators": 156,
+          "random_state": 1027309
+        },
+        "checkpoint_predictions_verified_in_saved_report": true
+      },
+      "submission": {
+        "rows": 418,
+        "local_csv_sha256": "c1510e47cca3888bc751cd6c6f016d18aead0d680442c457b1919d92c2f4aff2",
+        "kaggle_ref": null
+      },
+      "versions": {
+        "numpy": "2.5.4",
+        "polars": "2.0.0",
+        "scikit-learn": "1.9.1",
+        "torch": "2.14.1",
+        "optuna": "5.0.0",
+        "optuna-integration": "5.0.0",
+        "joblib": "1.6.0",
+        "matplotlib": "3.11.2",
+        "marimo": "0.25.2",
+        "omegaconf": "2.4.0"
+      },
+      "source_sha256": {
+        "run.py": "301a77740da75955c061e8dfd5ba414f33308f479e1a0f959230519e3c32314c",
+        "src/models.py": "156393276908319f0635e3c1e43ed170980a33d2b53a48a00538c3db8850930c",
+        "src/evaluation.py": "9d0ad69a2e141fa0a378208592831f8e6345ec8b53f72f0686d01e15996c0ea1",
+        "src/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "src/features.py": "9a33ecc26b3d84395c1b6bd0eb4b1efd0fe00bb233ac5fd20ad86bffb4768ba9",
+        "src/utils.py": "cb64182fff26e11a50f4b127af6ca2133d1cb26ec8ad565ee6c20aba3a740c7a",
+        "src/training.py": "761a7900e2c178292a42dc73982ea390a7196bf5f7da85a0d0cf5f98c06f558b",
+        "src/data.py": "d414b70496323e1539816033c3f4ff152a2560452c3be0c2409e0007baba91d4"
+      },
+      "evidence_files": [
+        "config.yaml",
+        "manifest.json",
+        "metrics.json",
+        "evaluation/results.json",
+        "evaluation/oof.csv",
+        "training.json",
+        "submission.csv",
+        "inference.json"
+      ]
+    }
+  ]
+}
