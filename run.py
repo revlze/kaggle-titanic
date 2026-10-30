@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 from importlib.metadata import version
 from pathlib import Path
 
-# Match notebook runtime settings before importing numeric libraries.
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 ROOT = Path(__file__).resolve().parent
@@ -53,7 +52,7 @@ def run_pipeline(config, root=ROOT):
         "model": config.model.name if mode != "predict" else None,
         "feature_set": config.features.feature_set if mode != "predict" else None,
         "summary": "summary.md", "metrics": "metrics.json",
-        "versions": {name: version(name) for name in ["numpy", "polars", "scikit-learn", "omegaconf", "optuna", "joblib"]},
+        "versions": {name: version(name) for name in ["numpy", "polars", "scikit-learn", "omegaconf", "optuna", "joblib", "catboost", "xgboost", "lightgbm"]},
         "source_sha256": {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
                           for path in [Path(__file__), *(ROOT / "src").glob("*.py")]},
     }
