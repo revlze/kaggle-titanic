@@ -1,16 +1,9 @@
-# Titanic: a configurable classical ML pipeline
+# Titanic
 
-I built this project to predict Titanic passenger survival with a small, explicit
-sklearn pipeline. I can run logistic regression, gradient boosting, CatBoost,
-XGBoost, LightGBM and K-nearest neighbors (KNN). I use one YAML file to configure
-features, evaluation, Optuna and a single model or seed ensemble. I keep learned
-preprocessing inside the folds and separate evaluation from final parameter
-selection and refitting.
+Titanic survival predictions.
 
-**My best recorded Kaggle public accuracy: [0.77272](docs/EXPERIMENTS.md#source-and-matching-boundary)**,
-achieved by both my fixed and tuned logistic-regression submissions. My other
-submissions did not exceed that baseline. I use public scores as an external
-check; they do not provide private-test results or establish statistical significance.
+**Best recorded Kaggle public accuracy: [0.77272](docs/EXPERIMENTS.md#source-and-matching-boundary)**,
+achieved by both my fixed and tuned logistic-regression submissions.
 
 ```mermaid
 flowchart LR
@@ -23,75 +16,57 @@ flowchart LR
     P --> O["Submission CSV"]
 ```
 
-I evaluate models separately from final fitting. When I enable Optuna, it selects
-parameters using development rows; the final pipeline is then fitted afresh on
-all labeled rows. Every evaluation fit includes its own preprocessing. I use the
-Kaggle test set only for inference. My latest recorded submission is tuned KNN,
-while logistic regression still has my highest public score in this comparison.
-
 ## Recorded results
 
-I report local accuracy as **percent mean ± fold SD in percentage points** and
-public scores as fractions on the 0–1 scale; higher is better. I use five-fold CV
-for fixed models and five outer / three inner folds for tuned models, on the
-same 712 development rows. SD is not a confidence interval.
+Local CV is **mean accuracy (%) ± fold SD (percentage points)**. Fixed models use
+5-fold CV; tuned models use 5 outer / 3 inner folds on the same 712 development rows
+(idk, maybe nested CV is not needed here).
 
-| Model / setup | Optuna trials / search | Local CV, % ± SD | Public accuracy | Submission ID |
-|---|---:|---:|---:|---:|
-| Logistic regression (baseline) | 0 | 82.72 ± 2.15 | **0.77272** | 57764095 |
-| Logistic regression + Optuna | 60 | 82.30 ± 2.44 | **0.77272** | 57764463 |
-| Gradient boosting (baseline) | 0 | 82.86 ± 1.71 | 0.76076 | 57764134 |
-| Gradient boosting + Optuna | 20 | 83.00 ± 2.10 | 0.75837 | 57760541 |
-| XGBoost + Optuna | 60 | 83.56 ± 3.24 | 0.75837 | 57797886 |
-| XGBoost ensemble (5 models) | 60 | 82.87 ± 2.62 | 0.75598 | 57797655 |
-| LightGBM + Optuna | 60 | 82.58 ± 2.81 | 0.76076 | 57798445 |
-| K-nearest neighbors + Optuna | 60 | 81.32 ± 3.13 | 0.75837 | 57799934 |
+| Model / setup | Optuna trials / search | Local CV, % ± SD | Public accuracy |
+|---|---:|---:|---:|
+| Logistic regression (baseline) | 0 | 82.72 ± 2.15 | **0.77272** |
+| Logistic regression + Optuna | 60 | 82.30 ± 2.44 | **0.77272** |
+| Gradient boosting (baseline) | 0 | 82.86 ± 1.71 | 0.76076 |
+| Gradient boosting + Optuna | 20 | 83.00 ± 2.10 | 0.75837 |
+| XGBoost + Optuna | 60 | 83.56 ± 3.24 | 0.75837 |
+| XGBoost ensemble (5 models) | 60 | 82.87 ± 2.62 | 0.75598 |
+| LightGBM + Optuna | 60 | 82.58 ± 2.81 | 0.76076 |
+| K-nearest neighbors + Optuna | 60 | 81.32 ± 3.13 | 0.75837 |
 
-I recorded these public scores from Kaggle CLI output on 2026-10-30. Private
-scores were blank. I matched submissions to local runs using their descriptions
-and saved metadata; the CLI output does not include uploaded-file hashes. I keep
-exact run IDs, original submission descriptions, configurations, per-fold scores
-and local CSV hashes in the [result snapshot](docs/experiment-results.json), with
-details in my [experiment notes](docs/EXPERIMENTS.md).
+[result snapshot](docs/experiment-results.json), [experiment notes](docs/EXPERIMENTS.md).
 
-![Local CV mean and fold SD versus Kaggle public accuracy for my eight submissions.](docs/figures/accuracy-comparison.svg)
+![Local CV mean and fold SD versus Kaggle public accuracy.](docs/figures/accuracy-comparison.svg)
 
-The figure compares different evaluation populations. Local scores come from
-saved CV reports and OOF predictions.
-
-With tuned KNN, I reached **81.32% ± 3.13 pp** local CV and **0.75837** public
-accuracy. Final selection chose 23 neighbors, uniform weights and Euclidean
-distance. This run did not exceed my logistic-regression baseline on either metric.
-
-Optuna did not improve my logistic-regression public score. My five-seed XGBoost
-ensemble had lower CV and public accuracy than the single XGBoost model. I tuned
-them separately, so I cannot attribute this difference to averaging alone. In
-two additional GB searches, I reached 83.57% and 83.85% local CV; I have no
-recorded public scores for those runs in this comparison. These results do not
-explain the CV-to-public gap or establish a universal model ranking.
+CV and public scores are measured on different data.
 
 ## Run and configure
 
-Use Python 3.14+ and the environment declared in [pyproject.toml](pyproject.toml).
-The dependency file gives version lower bounds; saved run versions are included
-in the result snapshot. Place the original
-Titanic CSVs at `data/titanic/train.csv` and `data/titanic/test.csv`, then edit
+Model examples are in [configs/](configs/). Copy one to `config.yaml`, e.g.:
+
+```bash
+cp configs/config_catboost.yaml config.yaml
+```
+
+Optuna is off in the examples; set `tuning.enabled: true` to use the included search space.
+
+DNN examples: [MyModel](configs/config_dnn.yaml) and [MyModelEmb](configs/config_dnn_embedding.yaml).
+`custom/Name` loads a PyTorch model from `src/models.py`; input sizes are inferred automatically.
+
+Place the original Titanic CSVs at `data/titanic/train.csv` and `data/titanic/test.csv`, then edit
 [config.yaml](config.yaml) and run:
 
 ```bash
-.venv/bin/python run.py
+uv sync --python 3.14
+uv run python run.py
 ```
 
-There are no CLI options. The script finds the root config and resolves relative
-data/output/model paths from the project root, even when the current working
-directory is elsewhere. Absolute paths also work, including Kaggle input paths.
 Each run creates `artifacts/<exp_name>/<UTC timestamp>/`; earlier runs are preserved.
 
 | Setting | Purpose / default |
 |---|---|
 | `base.exp_name`, `base.seed` | Run label and existing seed `0xFACED` |
 | `run.mode` | `full`, `evaluate`, `train`, or `predict` |
-| `run.model_path` | Saved `model.joblib`, required for `predict` |
+| `run.model_path` | Saved `model.joblib` or `model.pt`, required for `predict` |
 | `data.train_path`, `data.test_path` | CSV locations |
 | `features.feature_set` | `base_title_family` by default |
 | `preprocessing` | One-hot encoding; enable scaling for logistic regression and KNN |
@@ -99,13 +74,13 @@ Each run creates `artifacts/<exp_name>/<UTC timestamp>/`; earlier runs are prese
 | `ensemble` | Member count, soft/hard voting or stacking, OOF folds and meta-model |
 | `validation` | Development fraction, evaluation folds and inner search folds |
 | `tuning` | Optuna enable flag, trial budget and parameter distributions |
+| `training`, `loss`, `optimizer`, `scheduler` | DNN epochs, batch size, device and training settings |
 | `metric.name` | `accuracy`, the supported primary metric |
 | `output.dir` | `artifacts` |
-| `comparison.runs` | Run folders to compare using the separate script |
 
 `full` evaluates, fits the final model, and writes predictions. `evaluate` only
-produces evaluation artifacts; `train` only selects parameters if requested and
-fits the final model. For inference without training, use:
+runs CV; `train` fits the final model, with parameter selection if enabled.
+For inference without training:
 
 ```yaml
 run:
@@ -113,323 +88,22 @@ run:
   model_path: artifacts/gb_v1/<run_id>/model.joblib
 ```
 
-Inference loads the feature specification and fitted preprocessing from the
-artifact. Current YAML model/feature/search settings do not rebuild or refit it;
-`data.test_path` and `output` still control input and destination. `inference.json`
-records the model and training configuration actually used.
+To change the model, edit `model.name` and `model.params`. If Optuna is enabled,
+replace `tuning.search_space` with parameters for that model too.
 
-<details>
-<summary>Configure the logistic-regression baseline</summary>
+For seed ensembles, set `ensemble.n_models` and choose `soft`, `hard` or `stacking`
+in `ensemble.method`. Members use the same model family. KNN and custom DNNs use one model.
 
-For a LogisticRegression baseline, replace the `model` block and enable scaling:
+Default features: `Pclass`, `Age`, `SibSp`, `Parch`, `Fare`, `Sex`, `Embarked`,
+plus `Title` and `FamilySize`. Preprocessing is fitted inside each training fold.
 
-```yaml
-model:
-  name: LogisticRegression
-  params:
-    C: 1.0
-    max_iter: 2000
-    random_state: ${base.seed}
-preprocessing:
-  encoding: onehot
-  scale: true
-```
+## Outputs
 
-Use a different `base.exp_name`, for example `lr_v1`. If enabling Optuna for this
-model, also replace `tuning.search_space` with:
+Open `summary.md` in the run folder for accuracy and final parameters.
+`metrics.json` has the same scores. CV accuracy is the evaluation result;
+the final Optuna score is used for parameter selection.
 
-```yaml
-search_space:
-  C: {type: float, low: 0.001, high: 100, log: true}
-```
+`submission.csv` is ready for Kaggle. Classical models use `model.joblib`;
+DNNs use `model.pt` plus `preprocess.joblib` in the same run folder.
 
-</details>
-
-<details>
-<summary>Configure K-nearest neighbors (KNN)</summary>
-
-Replace the corresponding blocks in `config.yaml`:
-
-```yaml
-base:
-  exp_name: knn_v1
-  seed: 0xFACED
-  run_kind: full
-model:
-  name: KNeighborsClassifier
-  params:
-    n_neighbors: 15
-    weights: distance
-    metric: minkowski
-    p: 2
-    n_jobs: 1
-preprocessing:
-  encoding: onehot
-  scale: true
-ensemble:
-  n_models: 1
-tuning:
-  enabled: false
-  n_trials: 20
-  search_space:
-    n_neighbors: {type: int, low: 3, high: 31, step: 2}
-    weights: {type: categorical, choices: [uniform, distance]}
-    p: {type: categorical, choices: [1, 2]}
-```
-
-KNN uses distances, so numeric scaling should be enabled inside the fold's
-pipeline. `n_neighbors` controls how many nearby passengers vote; `weights:
-distance` gives closer passengers more weight. With `metric: minkowski`, `p: 1`
-is Manhattan distance and `p: 2` is Euclidean distance. These are starting settings,
-not a measured improvement. See the
-[KNeighborsClassifier parameters](https://scikit-learn.org/stable/modules/generated/sklearn.neighbors.KNeighborsClassifier.html).
-
-KNN has no `random_state`; omit that parameter and use one model. The current
-ensemble option varies only seeds, so multiple copies of the same KNN would be
-identical and are rejected. To tune KNN, enable `tuning.enabled` and keep the
-KNN-specific search space above, using a new experiment name such as `knn_v1_tuned`.
-
-</details>
-
-Search keys are native model parameters; code supplies the sklearn nesting and
-applies a shared setting to all ensemble members. Replace the whole search space
-when changing model families. Saved run configurations and final effective
-parameters are different: Optuna replaces searched settings during final selection.
-
-I currently use `KNeighborsClassifier` in the checked-in configuration, with one
-model, numeric scaling and 60 Optuna trials per search. It starts with 15 neighbors,
-distance weights and Euclidean distance. Search varies the neighbor count,
-uniform/distance weights and Manhattan/Euclidean distance.
-
-I used `n_jobs: 1` in my LightGBM run because runs with four threads crashed in
-my mixed-library macOS environment. This is a local environment workaround, not
-a general restriction of LightGBM.
-
-### Simple seed ensembles
-
-`ensemble.n_models: 1` keeps a single model. Set it to `5` to train five copies
-of `model.name` with the same parameters and distinct, reproducible seeds derived
-from `base.seed`. `ensemble.method` selects soft voting, hard voting or stacking.
-The default is `soft`, the equal mean of class probabilities. All
-copies train on the complete training portion of each fold; final copies train
-on all labeled rows. This is an ensemble of one model family, with shared
-parameters, rather than a mixture of different model classes.
-KNN requires `ensemble.n_models: 1` because it has no seed-based variation.
-
-<details>
-<summary>CatBoost and XGBoost configuration examples</summary>
-
-For five CatBoost models, replace the corresponding blocks in `config.yaml`:
-
-```yaml
-base:
-  exp_name: catboost_5seeds
-  seed: 0xFACED
-  run_kind: full
-model:
-  name: CatBoostClassifier
-  params:
-    iterations: 300
-    depth: 4
-    learning_rate: 0.05
-    l2_leaf_reg: 3.0
-    thread_count: 1
-    random_state: ${base.seed}
-ensemble:
-  n_models: 5
-  method: soft
-preprocessing:
-  encoding: onehot
-  scale: false
-tuning:
-  enabled: false
-  n_trials: 20
-  search_space: {}  # Replace with model-specific ranges before enabling Optuna.
-```
-
-For five XGBoost models, use the same ensemble/preprocessing settings and replace
-the model block:
-
-```yaml
-model:
-  name: XGBClassifier
-  params:
-    n_estimators: 300
-    max_depth: 3
-    learning_rate: 0.05
-    subsample: 0.8
-    colsample_bytree: 0.8
-    objective: binary:logistic
-    eval_metric: logloss
-    tree_method: hist
-    n_jobs: 1
-    random_state: ${base.seed}
-```
-
-Use a separate experiment name, such as `xgb_5seeds`. These are starting settings,
-not measured improvements. XGBoost's row/column subsampling makes different seeds
-useful; changing only the seed can otherwise produce identical models. CatBoost
-uses the existing numeric imputation and one-hot representation here; native
-categorical handling is not enabled. CatBoost's verbose output and auxiliary file
-writing are disabled by default.
-
-</details>
-
-I use sklearn's
-[VotingClassifier](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.VotingClassifier.html)
-and [StackingClassifier](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.StackingClassifier.html).
-All three methods use the same member seeds for a given `base.seed` and ensemble
-size. CV scores the complete ensemble, not an average of member accuracies.
-The saved pipeline includes all
-members and the stacking meta-model, so predict mode needs only `model.joblib`.
-Earlier soft-voting artifacts saved with BaggingClassifier remain loadable;
-new runs use the common seed assignment for all three methods.
-
-| `ensemble.method` | Prediction rule | `p_survived` |
-|---|---|---|
-| `soft` | Class with the highest mean probability | Mean survival probability |
-| `hard` | Majority of predicted class labels | Empty; hard voting has no probability output |
-| `stacking` | Meta-model combines base probabilities | Meta-model's survival probability |
-
-For hard voting, set `method: hard`; an odd model count such as five avoids tied
-votes. With an even count, a tie is resolved in favor of the smaller class label
-(`0`). Accuracy is still available. Prediction and OOF CSVs retain `p_survived`
-with empty values; these are not replaced with vote fractions or label values.
-
-For stacking, use:
-
-```yaml
-ensemble:
-  n_models: 5
-  method: stacking
-  stacking_folds: 3
-  meta_model:
-    name: LogisticRegression
-    params:
-      C: 1.0
-      max_iter: 2000
-```
-
-The meta-model learns from OOF probabilities of the base models. Preprocessing
-is inside each base pipeline, so imputers, scalers and encoders are fitted
-again inside each stacking fold. Base models are then available fitted on the
-complete parent training portion for inference. Raw features are not passed to
-the meta-model. These OOF folds are required even with `tuning.enabled: false`;
-`stacking_folds` does not replace the outer CV used to evaluate the ensemble.
-Three stacking folds require four base fits per member for each ensemble fit,
-including the refit on the complete parent training portion. Stacking of similar
-seed copies may add little information; improvement must be measured on CV.
-
-Optuna works with all three methods: each trial selects one shared parameter set
-for all members and scores the complete ensemble's predictions. Keep native
-parameter names in `tuning.search_space`; code applies the same sampled value
-to every member. Stacking meta-model settings stay fixed in `ensemble.meta_model`.
-For example, replace the entire search space before enabling tuning for CatBoost:
-
-```yaml
-search_space:
-  depth: {type: int, low: 3, high: 6}
-  learning_rate: {type: float, low: 0.02, high: 0.1, log: true}
-  l2_leaf_reg: {type: float, low: 1.0, high: 10.0, log: true}
-```
-
-Set a deliberate `tuning.n_trials` budget: soft/hard voting fits five models each
-time, and stacking adds its OOF fits.
-`summary.md` shows ensemble size and actual final member seeds; `training.json`
-and `metrics.json` store them under `ensemble`. `parameters` contains shared base
-model parameters; member seeds are recorded separately.
-
-## Features and evaluation
-
-I use `Pclass`, `Age`, `SibSp`, `Parch`, `Fare`, `Sex`, `Embarked`, plus two
-row-wise features from my original notebook: `Title` extracts
-an honorific from `Name`, and `FamilySize` counts the passenger and accompanying
-relatives. Both are computed identically for train and test. Other existing
-feature sets remain available through `features.feature_set`; additional features
-are not generated automatically.
-
-Numeric missing values use a median imputer. Categorical missing values use a
-most-frequent imputer followed by an encoder that handles unseen categories.
-I enable scaling for logistic regression and KNN. Every learned
-transform lives inside the sklearn pipeline and is fitted on that fold's
-training rows. Row-wise feature extraction itself learns no statistics.
-
-I keep my original stratified 80/20 split and seed: 712 development and 179
-holdout rows for the train CSV. I exclude the previously viewed holdout from
-evaluation and tuning. Validation uses row-level stratification;
-generalization to entirely new families or tickets would require a separate
-group-based protocol.
-
-| `tuning.enabled` | Parameter selection | Quality evaluation |
-|---|---|---|
-| `false` | Fixed YAML parameters | Ordinary 5-fold CV on development; no inner search folds or Optuna |
-| `true` (current config) | Optuna on 3 inner folds per outer train | Nested 5-fold outer CV on development |
-
-I currently use 60 trials per outer fold, followed by one separate 60-trial final
-search. My earlier GB runs used 20 or 50 trials. Inner selection
-accuracy is recorded separately from outer accuracy. Outer OOF predictions cover each
-development passenger exactly once, from a model that did not train on that row.
-Fold models are saved and reloaded before scoring. Mean fold accuracy, fold SD
-(with `ddof=0`) and pooled OOF accuracy are separate fields; SD is not a confidence
-interval. Repeatedly choosing features or models from CV scores still limits
-claims about the selected winner.
-
-Final training does not choose the best outer fold. With tuning enabled, it runs
-a separate three-fold Optuna search on the whole development subset, using the
-same search space and budget. It then freezes the selected parameters, clones a
-fresh pipeline and fits all 891 labeled rows, including the former holdout. With
-tuning disabled, it directly refits the configured parameters on all labels.
-This final fit has no new independent validation score.
-
-## Saved outputs and comparison
-
-**Open `summary.md` in a run folder to read the result.** It shows the CV
-accuracy estimate first, the separate final Optuna selection score, and the
-parameters actually used for the final model. `metrics.json` contains the same
-scores as compact numeric fields. The report is published as soon as evaluation
-finishes, before the separate final Optuna search; its status is updated at the
-end of the run. Accuracy is shown as a percentage in Markdown and on the 0–1
-scale in JSON. Fold SD is not a confidence interval.
-
-| Artifact, relative to a run folder | Content |
-|---|---|
-| `summary.md`, `metrics.json` | Main readable report and compact metrics; start here |
-| `config.yaml`, `manifest.json` | Resolved settings, status, data/source hashes and library versions |
-| `evaluation/results.json`, `evaluation/manifest.json` | Splits, per-fold parameters and separate selection/evaluation scores |
-| `evaluation/oof.csv`, `evaluation/comparison.csv`, `evaluation/outer_accuracy.png` | OOF predictions, summary and labeled CV plot |
-| `evaluation/<model>/fold_*.joblib` | Fitted fold preprocessing and classifier |
-| `evaluation/<model>/fold_*_trials.csv` | Inner trials, only when tuning is enabled |
-| `model.joblib`, `training.json` | Final pipeline and compact report of selection, parameters and final fit size |
-| `training_splits.json` | Technical passenger identities and indices used for final selection |
-| `final_trials.csv` | Separate final-selection trials, only when tuning is enabled |
-| `submission.csv`, `predictions.csv`, `inference.json` | Ordered integer predictions, separate probabilities and inference provenance |
-
-Set `comparison.runs` to two or more completed run folders, then run:
-
-```bash
-.venv/bin/python compare.py
-```
-
-The script prints a table and rejects incompatible data hashes, feature sets,
-metrics, run kinds or outer splits. Fixed and tuned models can be compared on
-identical outer folds. Inner selection scores never determine the ranking.
-
-## Project code
-
-I group the working functions by task: [data](src/data.py),
-[features](src/features.py), [models](src/models.py), [training](src/training.py),
-and [evaluation](src/evaluation.py). Config-based object construction lives in
-[utils](src/utils.py): `get_model`, `get_pipeline` and `get_search_space` are used
-by the classical run; `get_loss`, `get_optimizer` and `get_scheduler` are used by
-the existing DNN training code. GB's `model.params.loss` is a native string
-parameter passed through `get_model`; it does not require a PyTorch loss or
-optimizer. [run.py](run.py) connects the stages;
-[compare.py](compare.py) reads reports without training. Paths and seeds come
-from the config; model artifacts and generated reports are ignored by Git.
-
-I keep my earlier experiments and saved results in the notebooks. My four-model
-nested comparison is available in [notebook 05](notebooks/05_nested_comparison.py)
-through its `RUN_FULL` switch. Its MLP keeps a separate internal
-stopping split inside each outer train; larger DNN and embedding experiments
-remain in notebook 04. I treat earlier selection scores and holdout maxima as
-historical results, rather than independent evidence for the current pipeline.
+Earlier experiments are in `notebooks/`.

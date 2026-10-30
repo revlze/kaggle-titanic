@@ -136,9 +136,8 @@ LightGBM and K-nearest neighbors through the YAML runner. I completed a full KNN
 run and submitted it to Kaggle, using a single model with numeric scaling. Seed
 ensembles for models with random seeds support soft voting, hard voting and stacking.
 Of the ensemble methods, I have a full local run and public score only for the
-**five-seed XGBoost soft ensemble** in this comparison. I have implementation
-smoke checks for CatBoost, hard voting and stacking, but no full comparative
-results for them in this table.
+**five-seed XGBoost soft ensemble** in this comparison. I have no full comparative
+results for CatBoost, hard voting or stacking in this table.
 
 Soft/hard voting uses sklearn VotingClassifier. Stacking trains its meta-model
 on OOF probabilities with preprocessing inside every base pipeline. Its own OOF
@@ -155,19 +154,9 @@ saved runs and the CLI history above, without retraining models, reloading
 checkpoints for inference or making new submissions. I copied checkpoint-consistency
 flags from the original run reports and have not reverified them for this comparison.
 
-I previously recorded 19 passing tests and short fixed/nested,
-voting/stacking and LightGBM checks. I keep these engineering checks separate
-from the full experiment results above. I did not rerun the checks that fit
-models when assembling this comparison; their sources are under `tests/`.
-
 To reproduce a historical setup, use that run's resolved `configuration` in the
 JSON snapshot rather than today's mutable `config.yaml`. Keep its data, split,
 preprocessing, ensemble and search settings together, then use the existing
 runner described in the [README](../README.md#run-and-configure). The snapshot
 records library versions and hashes; it does not bundle the original environment
 or guarantee identical results across platforms and later dependency versions.
-
-I documented earlier selection/epoch-accounting problems in my
-[2026-10-28 evaluation audit](../EVALUATION_AUDIT.md). I keep its old scores,
-commands and seven-test count as historical context and use the current runner
-and saved configs to reproduce the experiments above.
