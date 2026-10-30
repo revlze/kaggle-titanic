@@ -23,6 +23,7 @@ from features import make_features, make_preprocess
 from models import SmallMLP, comparison_search_spaces, suggest_small_mlp
 from training import fit_dnn, predict_dnn, restore_dnn, tune_classical
 from data import split_development
+from utils import get_model_report, predict_classifier
 
 
 def write_run_summary(run_dir):
@@ -41,9 +42,14 @@ def write_run_summary(run_dir):
     parameters = training.get("parameters", {})
     # Show configured and tuned parameters; full constructor defaults stay in training.json.
     parameter_names = set(config.model.params) | {
-        name.removeprefix("model__") for name in selection.get("best_params", {})
+        name.rsplit("__", 1)[-1] for name in selection.get("best_params", {})
     }
     final_parameters = {name: value for name, value in parameters.items() if name in parameter_names}
+    training_config = inference.get("training_configuration", {}) if manifest["mode"] == "predict" else config
+    ensemble = training.get("ensemble") or inference.get("ensemble") or {
+        "n_models": OmegaConf.select(OmegaConf.create(training_config), "ensemble.n_models", default=1),
+        "method": OmegaConf.select(OmegaConf.create(training_config), "ensemble.method", default="soft"),
+    }
     metrics = {
         "experiment": manifest["exp_name"], "status": manifest["status"],
         "run_kind": manifest["run_kind"],
@@ -58,6 +64,9 @@ def write_run_summary(run_dir):
         "trials_per_search": config.tuning.n_trials if config.tuning.enabled else 0,
         "final_model_fit_rows": training.get("fitted_rows"),
         "final_model_parameters": final_parameters or None,
+        "ensemble": ensemble,
+        "probabilities_available": training.get("probabilities_available",
+                                                inference.get("probabilities_available", score.get("probabilities_available"))),
         "prediction_rows": inference.get("rows"),
     }
     (run_dir / "metrics.json").write_text(json.dumps(metrics, indent=2))
@@ -68,6 +77,19 @@ def write_run_summary(run_dir):
     ]
     if manifest["run_kind"] == "smoke":
         lines += ["**SMOKE: execution check only; do not use these scores to choose a model.**", ""]
+    if ensemble["n_models"] > 1:
+        method = ensemble.get("method", "soft")
+        description = {"soft": "equal averaging of class probabilities",
+                       "hard": "majority vote of class labels", "stacking": "meta-model trained on OOF probabilities"}[method]
+        lines += [f"Ensemble: **{ensemble['n_models']} models**, **{method}**: {description}. "
+                  "CV evaluates the complete ensemble.", ""]
+        if method == "hard":
+            lines += ["Hard voting provides class labels only; `p_survived` is empty in prediction/OOF CSVs.", ""]
+        if ensemble.get("meta_model"):
+            lines += [f"Stacking: {ensemble['stacking_folds']} OOF folds; meta-model: "
+                      f"`{ensemble['meta_model']['name']}`. Preprocessing is fitted inside each OOF fold.", ""]
+        if ensemble.get("random_states"):
+            lines += [f"Member seeds: `{ensemble['random_states']}`.", ""]
     if score:
         lines += [
             f"## CV accuracy: {metrics['cv_accuracy_mean']:.2%} ± {metrics['cv_accuracy_std'] * 100:.2f} pp", "",
@@ -151,9 +173,12 @@ def validate_oof(oof, train_dataset, train_i, holdout_i, outer_splits, model_nam
             assert part["source_index"].to_list() == source.tolist()
             assert part["PassengerId"].to_list() == train_dataset[source]["PassengerId"].to_list()
             assert part["y_true"].to_list() == train_dataset[source]["Survived"].to_list()
-        probabilities = rows["p_survived"].to_numpy()
-        assert np.isfinite(probabilities).all()
-        assert ((probabilities >= 0) & (probabilities <= 1)).all()
+        if rows["p_survived"].null_count():
+            assert rows["p_survived"].null_count() == len(rows)
+        else:
+            probabilities = rows["p_survived"].to_numpy()
+            assert np.isfinite(probabilities).all()
+            assert ((probabilities >= 0) & (probabilities <= 1)).all()
         assert set(rows["y_pred"].to_list()) <= {0, 1}
 
 
@@ -269,12 +294,13 @@ def run_cv_experiment(train_dataset, model_specs, results_path, *, feature_set,
                 joblib.dump(fitted, saved_path)
                 # Outer predictions come directly from the serialized estimator.
                 restored = joblib.load(saved_path)
-                predictions = restored.predict(X_dev[val])
-                probabilities = restored.predict_proba(X_dev[val])[:, list(restored.classes_).index(1)]
-                assert np.array_equal(predictions, fitted.predict(X_dev[val]))
-                assert np.array_equal(probabilities, fitted.predict_proba(X_dev[val])[:, 1])
+                predictions, probabilities = predict_classifier(restored, X_dev[val])
+                original_predictions, original_probabilities = predict_classifier(fitted, X_dev[val])
+                assert np.array_equal(predictions, original_predictions)
+                assert np.array_equal(probabilities, original_probabilities)
+                model_report = get_model_report(restored.named_steps["model"])
                 record.update(checkpoint=str(saved_path.relative_to(run_dir)),
-                              estimator_params=restored.named_steps["model"].get_params())
+                              estimator_params=model_report["parameters"], ensemble=model_report["ensemble"])
             elif spec["kind"] == "dnn":
                 study = optuna.create_study(
                     direction="maximize", sampler=optuna.samplers.TPESampler(seed=fold_seed),
@@ -354,19 +380,21 @@ def run_cv_experiment(train_dataset, model_specs, results_path, *, feature_set,
             if tune:
                 selection_scores.append(record["inner_selection_accuracy"])
                 study.trials_dataframe().to_csv(model_dir / f"fold_{fold}_trials.csv", index=False)
-            for position, prediction, probability in zip(val, predictions, probabilities):
+            for position, prediction, probability in zip(val, predictions, probabilities if probabilities is not None
+                                                        else [None] * len(val)):
                 source = int(train_i[position])
                 oof_rows.append({"model": name, "development_index": int(position), "source_index": source,
                                  "PassengerId": int(train_dataset[source, "PassengerId"]),
                                  "y_true": int(y_dev[position]), "outer_fold": fold,
-                                 "y_pred": int(prediction), "p_survived": float(probability)})
+                                 "y_pred": int(prediction), "p_survived": float(probability) if probability is not None else None})
         model_oof = pl.DataFrame([r for r in oof_rows if r["model"] == name])
         summary.append({"model": name, "score_role": score_role, "run_kind": run_kind,
                         "outer_accuracy_mean": float(np.mean(model_scores)),
                         "outer_accuracy_std": float(np.std(model_scores)), "outer_fold_scores": model_scores,
                         "outer_oof_accuracy": float(accuracy_score(model_oof["y_true"], model_oof["y_pred"])),
+                        "probabilities_available": model_oof["p_survived"].null_count() == 0,
                         "mean_inner_selection_accuracy": float(np.mean(selection_scores)) if tune else None})
-    oof = pl.DataFrame(oof_rows).sort(["model", "development_index"])
+    oof = pl.DataFrame(oof_rows).with_columns(pl.col("p_survived").cast(pl.Float64)).sort(["model", "development_index"])
     validate_oof(oof, train_dataset, train_i, holdout_i, outer_splits, list(model_specs))
     oof.write_csv(run_dir / "oof.csv")
     pl.DataFrame(summary).drop("outer_fold_scores").write_csv(run_dir / "comparison.csv")

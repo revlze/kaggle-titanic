@@ -4,6 +4,7 @@ import copy
 import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import joblib
 import numpy as np
@@ -13,8 +14,9 @@ import torch
 from omegaconf import OmegaConf
 from optuna_integration.sklearn import OptunaSearchCV
 from sklearn.base import clone
+from sklearn.ensemble import StackingClassifier, VotingClassifier
 from sklearn.metrics import accuracy_score
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedKFold, cross_val_score
 from torch.utils.data import DataLoader, TensorDataset
 
 import utils
@@ -30,6 +32,36 @@ def tune_classical(estimator, distributions, X, y, cv, *, seed, n_trials):
         direction="maximize", sampler=optuna.samplers.TPESampler(seed=seed),
         pruner=optuna.pruners.NopPruner(),
     )
+    model = estimator.named_steps["model"]
+    if isinstance(model, (VotingClassifier, StackingClassifier)):
+        # Sample one shared setting, then apply it to every member of the ensemble.
+        first_name = model.estimators[0][0]
+
+        def shared_params(params):
+            return {key.replace(f"model__{first_name}__", f"model__{name}__", 1): value
+                    for key, value in params.items() for name, _ in model.estimators}
+
+        def objective(trial):
+            params = {}
+            for name, distribution in distributions.items():
+                if isinstance(distribution, optuna.distributions.CategoricalDistribution):
+                    params[name] = trial.suggest_categorical(name, distribution.choices)
+                elif isinstance(distribution, optuna.distributions.IntDistribution):
+                    params[name] = trial.suggest_int(name, distribution.low, distribution.high,
+                                                     step=distribution.step, log=distribution.log)
+                else:
+                    params[name] = trial.suggest_float(name, distribution.low, distribution.high,
+                                                       step=distribution.step, log=distribution.log)
+            candidate = clone(estimator).set_params(**shared_params(params))
+            scores = cross_val_score(candidate, X, y, cv=cv, scoring="accuracy", n_jobs=1, error_score="raise")
+            trial.set_user_attr("inner_fold_scores", scores.tolist())
+            return float(np.mean(scores))
+
+        study.optimize(objective, n_trials=n_trials)
+        best_params = shared_params(study.best_params)
+        fitted = clone(estimator).set_params(**best_params).fit(X, y)
+        return SimpleNamespace(best_estimator_=fitted, best_params_=best_params,
+                               best_score_=study.best_value, study_=study)
     search = OptunaSearchCV(
         clone(estimator), distributions, cv=cv, scoring="accuracy", n_trials=n_trials,
         n_jobs=1, refit=True, study=study, error_score="raise",
@@ -74,8 +106,10 @@ def fit_classical(train_dataset, estimator, config, run_dir, distributions=None)
     model_path = run_dir / "model.joblib"
     joblib.dump(artifact, model_path)
     restored = joblib.load(model_path)["pipeline"]
-    assert np.array_equal(fitted.predict(X), restored.predict(X))
-    assert np.array_equal(fitted.predict_proba(X), restored.predict_proba(X))
+    original_predictions, original_probabilities = utils.predict_classifier(fitted, X)
+    restored_predictions, restored_probabilities = utils.predict_classifier(restored, X)
+    assert np.array_equal(original_predictions, restored_predictions)
+    assert np.array_equal(original_probabilities, restored_probabilities)
     # Keep row identities and split indices out of the readable training report.
     selection_splits = {key: selection.pop(key) for key in [
         "development_indices", "excluded_holdout_indices", "splits",
@@ -87,7 +121,8 @@ def fit_classical(train_dataset, estimator, config, run_dir, distributions=None)
     report = {
         "model": config.model.name, "fit_role": "final_refit_all_labeled_rows",
         "fitted_rows": len(y), "splits_path": "training_splits.json",
-        "selection": selection, "parameters": fitted.named_steps["model"].get_params(),
+        "selection": selection, **utils.get_model_report(fitted.named_steps["model"]),
+        "probabilities_available": original_probabilities is not None,
         "checkpoint_predictions_verified": True,
     }
     (run_dir / "training.json").write_text(json.dumps(report, indent=2))
@@ -101,19 +136,23 @@ def predict_classical(model_path, test_dataset, run_dir):
     if X.columns != artifact["feature_columns"]:
         raise ValueError("Inference features differ from the saved training columns")
     model = artifact["pipeline"]
-    predictions = model.predict(X)
-    probabilities = model.predict_proba(X)[:, list(model.classes_).index(1)]
+    predictions, probabilities = utils.predict_classifier(model, X)
     if (predictions.shape != (len(test_dataset),) or not np.isin(predictions, [0, 1]).all()
-            or not np.isfinite(probabilities).all() or not ((0 <= probabilities) & (probabilities <= 1)).all()):
+            or (probabilities is not None and (
+                probabilities.shape != (len(test_dataset),) or not np.isfinite(probabilities).all()
+                or not ((0 <= probabilities) & (probabilities <= 1)).all()))):
         raise ValueError("Invalid prediction shape, labels or probabilities")
     submission = test_dataset.select("PassengerId").with_columns(
         pl.Series("Survived", predictions, dtype=pl.Int64),
     )
     run_dir = Path(run_dir)
     submission.write_csv(run_dir / "submission.csv")
-    submission.with_columns(pl.Series("p_survived", probabilities)).write_csv(run_dir / "predictions.csv")
+    submission.with_columns(pl.Series("p_survived", probabilities if probabilities is not None
+                                      else [None] * len(submission), dtype=pl.Float64)).write_csv(run_dir / "predictions.csv")
     (run_dir / "inference.json").write_text(json.dumps({
         "model_path": str(Path(model_path).resolve()), "model": artifact["model_name"],
+        "ensemble": utils.get_model_report(model.named_steps["model"])["ensemble"],
+        "probabilities_available": probabilities is not None,
         "feature_set": artifact["feature_set"], "feature_columns": X.columns,
         "rows": len(submission), "training_configuration": artifact["configuration"],
         "test_dataframe_sha256": hashlib.sha256(test_dataset.write_csv().encode()).hexdigest(),

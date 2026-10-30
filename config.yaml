@@ -1,5 +1,5 @@
 base:
-  exp_name: lr_v1
+  exp_name: lgbm_1_tuned
   seed: 0xFACED
   run_kind: full  # Use smoke for short protocol checks; do not rank smoke scores.
 
@@ -16,14 +16,38 @@ features:
 
 preprocessing:
   encoding: onehot
-  scale: true  # Set true for LogisticRegression.
+  scale: false  # Tree models do not require feature scaling.
 
 model:
-  name: LogisticRegression
+  name: LGBMClassifier
   params:
-    C: 1.0
-    max_iter: 2000
+    n_estimators: 300  # Number of boosting rounds.
+    learning_rate: 0.05  # Contribution of each new tree.
+    num_leaves: 15  # Main tree-complexity limit in LightGBM.
+    max_depth: 4  # Fixed while tuning num_leaves; depth 4 permits at most 16 leaves.
+    min_child_samples: 20  # Discourage leaves with too few observations.
+    subsample: 0.8  # Fraction of rows sampled per boosting iteration.
+    subsample_freq: 1  # Required to activate row subsampling.
+    colsample_bytree: 0.8  # Fraction of features sampled per tree.
+    reg_lambda: 3.0  # L2 regularization of leaf weights.
+    reg_alpha: 0.0  # L1 regularization; disabled for this starting configuration.
+    objective: binary
+    metric: binary_logloss  # Native metric; project CV still optimizes accuracy.
+    device_type: cpu
+    deterministic: true  # Stable CPU training with fixed data, parameters and seed.
+    force_col_wise: true  # Fixed histogram strategy for deterministic training.
+    verbosity: -1
+    n_jobs: 1  # Single-threaded: local macOS runtime crashes with four threads.
     random_state: ${base.seed}
+
+ensemble:
+  n_models: 1  # 1 = single model; 5 = five copies with different seeds.
+  method: soft  # soft: mean probabilities; hard: majority vote; stacking: meta-model.
+  stacking_folds: 3  # OOF folds for stacking, independent of Optuna.
+  meta_model:  # Used only by stacking.
+    name: LogisticRegression
+    params: {C: 1.0, max_iter: 2000}
+  # All copies use model.name/model.params. CatBoost and XGBoost examples are in README.
 
 validation:
   development_size: 0.8
@@ -31,17 +55,18 @@ validation:
   inner_splits: 3  # Used only when tuning is enabled.
 
 tuning:
-  enabled: false
+  enabled: true
   n_trials: 60  # Per outer fold, plus one separate search for final training.
-  # Original GB ranges. Keys are native model parameters, without model__.
-  # For LogisticRegression replace this mapping with the C example in README.
+  # Native model parameters, without model__. Replace when changing model.name.
+  # Model-specific ranges and ensemble examples are in README.
   search_space:
-    loss: {type: categorical, choices: [log_loss, exponential]}
-    learning_rate: {type: float, low: 0.0001, high: 0.1}
-    n_estimators: {type: int, low: 10, high: 200}
-    min_samples_split: {type: int, low: 2, high: 50}
-    min_samples_leaf: {type: int, low: 1, high: 50}
-    max_depth: {type: int, low: 1, high: 10}
+    n_estimators: {type: int, low: 100, high: 500, step: 50}
+    learning_rate: {type: float, low: 0.02, high: 0.1, log: true}
+    num_leaves: {type: int, low: 4, high: 15}
+    min_child_samples: {type: int, low: 10, high: 40}
+    subsample: {type: float, low: 0.7, high: 1.0}
+    colsample_bytree: {type: float, low: 0.7, high: 1.0}
+    reg_lambda: {type: float, low: 1.0, high: 10.0, log: true}
 
 metric:
   name: accuracy
