@@ -1,15 +1,16 @@
 # Titanic: a configurable classical ML pipeline
 
-Predict passenger survival with a small, explicit sklearn pipeline. Supported
-models are logistic regression, gradient boosting, CatBoost, XGBoost, LightGBM
-and K-nearest neighbors (KNN). One YAML file controls features, evaluation,
-Optuna and a single model or seed ensemble. Learned preprocessing stays inside
-the folds; final selection and full-data refitting are separate from evaluation.
+I built this project to predict Titanic passenger survival with a small, explicit
+sklearn pipeline. I can run logistic regression, gradient boosting, CatBoost,
+XGBoost, LightGBM and K-nearest neighbors (KNN). I use one YAML file to configure
+features, evaluation, Optuna and a single model or seed ensemble. I keep learned
+preprocessing inside the folds and separate evaluation from final parameter
+selection and refitting.
 
-**Best reported Kaggle public accuracy: [0.77272](docs/EXPERIMENTS.md#source-and-matching-boundary)**, shared by the fixed and tuned
-logistic-regression submissions. None of the submitted alternatives exceeded
-that baseline. These are reported public scores, not private-test results or
-evidence of statistical significance.
+**My best recorded Kaggle public accuracy: [0.77272](docs/EXPERIMENTS.md#source-and-matching-boundary)**,
+achieved by both my fixed and tuned logistic-regression submissions. My other
+submissions did not exceed that baseline. I use public scores as an external
+check; they do not provide private-test results or establish statistical significance.
 
 ```mermaid
 flowchart LR
@@ -22,19 +23,18 @@ flowchart LR
     P --> O["Submission CSV"]
 ```
 
-Evaluation and final fitting are separate. Optuna, when enabled, selects
-parameters using development rows; the final pipeline is then fitted afresh
-on all labeled rows. Every evaluation fit includes its own preprocessing.
-Kaggle test is read only for inference. The latest recorded submission is tuned
-KNN, while logistic regression retains the highest public score in the supplied
-submission snapshot.
+I evaluate models separately from final fitting. When I enable Optuna, it selects
+parameters using development rows; the final pipeline is then fitted afresh on
+all labeled rows. Every evaluation fit includes its own preprocessing. I use the
+Kaggle test set only for inference. My latest recorded submission is tuned KNN,
+while logistic regression still has my highest public score in this comparison.
 
 ## Recorded results
 
-Accuracy is higher-is-better. Local values below are **percent mean ± fold SD in
-percentage points**; public scores are fractions on the 0–1 scale. Fixed models
-use five-fold CV; tuned models use five outer / three inner folds on the same
-712 development rows. SD is not a confidence interval.
+I report local accuracy as **percent mean ± fold SD in percentage points** and
+public scores as fractions on the 0–1 scale; higher is better. I use five-fold CV
+for fixed models and five outer / three inner folds for tuned models, on the
+same 712 development rows. SD is not a confidence interval.
 
 | Model / setup | Optuna trials / search | Local CV, % ± SD | Public accuracy | Submission ID |
 |---|---:|---:|---:|---:|
@@ -47,30 +47,28 @@ use five-fold CV; tuned models use five outer / three inner folds on the same
 | LightGBM + Optuna | 60 | 82.58 ± 2.81 | 0.76076 | 57798445 |
 | K-nearest neighbors + Optuna | 60 | 81.32 ± 3.13 | 0.75837 | 57799934 |
 
-Public scores were supplied by the project author from Kaggle CLI output on
-2026-10-30; they were not fetched again for this documentation update. Runs are
-associated using the supplied CLI metadata; uploaded file bytes were not
-independently verified.
-Private scores were blank. Exact run IDs, original submission descriptions,
-configurations, per-fold scores and local CSV hashes are retained in the
-[result snapshot](docs/experiment-results.json) and explained in the
-[experiment notes](docs/EXPERIMENTS.md).
+I recorded these public scores from Kaggle CLI output on 2026-10-30. Private
+scores were blank. I matched submissions to local runs using their descriptions
+and saved metadata; the CLI output does not include uploaded-file hashes. I keep
+exact run IDs, original submission descriptions, configurations, per-fold scores
+and local CSV hashes in the [result snapshot](docs/experiment-results.json), with
+details in my [experiment notes](docs/EXPERIMENTS.md).
 
-![Local CV mean and fold SD versus reported public accuracy for eight submissions.](docs/figures/accuracy-comparison.svg)
+![Local CV mean and fold SD versus Kaggle public accuracy for my eight submissions.](docs/figures/accuracy-comparison.svg)
 
 The figure compares different evaluation populations. Local scores come from
 saved CV reports and OOF predictions.
 
-Tuned KNN recorded **81.32% ± 3.13 pp** local CV and **0.75837** public accuracy.
-Final selection chose 23 neighbors, uniform weights and Euclidean distance.
-This run did not exceed the logistic-regression reference on either metric.
+With tuned KNN, I reached **81.32% ± 3.13 pp** local CV and **0.75837** public
+accuracy. Final selection chose 23 neighbors, uniform weights and Euclidean
+distance. This run did not exceed my logistic-regression baseline on either metric.
 
-Optuna did not improve the reported logistic-regression public score. The
-five-seed XGBoost procedure recorded lower CV and public accuracy than the single
-XGBoost run, but both were tuned separately, so this is not a fixed-parameter
-comparison of averaging alone. Two additional GB searches reached 83.57% and 83.85%
-local CV; no public scores were supplied for them. These observations do not
-identify the cause of the CV-to-public gap or establish a universal model ranking.
+Optuna did not improve my logistic-regression public score. My five-seed XGBoost
+ensemble had lower CV and public accuracy than the single XGBoost model. I tuned
+them separately, so I cannot attribute this difference to averaging alone. In
+two additional GB searches, I reached 83.57% and 83.85% local CV; I have no
+recorded public scores for those runs in this comparison. These results do not
+explain the CV-to-public gap or establish a universal model ranking.
 
 ## Run and configure
 
@@ -198,14 +196,14 @@ applies a shared setting to all ensemble members. Replace the whole search space
 when changing model families. Saved run configurations and final effective
 parameters are different: Optuna replaces searched settings during final selection.
 
-The checked-in configuration currently uses `KNeighborsClassifier`, one model,
-numeric scaling and 60 Optuna trials per search. It starts with 15 neighbors,
+I currently use `KNeighborsClassifier` in the checked-in configuration, with one
+model, numeric scaling and 60 Optuna trials per search. It starts with 15 neighbors,
 distance weights and Euclidean distance. Search varies the neighbor count,
 uniform/distance weights and Manhattan/Euclidean distance.
 
-The recorded LightGBM run used `n_jobs: 1` because native crashes were
-observed with four threads in the mixed-library macOS environment. This is a local
-environment workaround, not a general restriction of LightGBM.
+I used `n_jobs: 1` in my LightGBM run because runs with four threads crashed in
+my mixed-library macOS environment. This is a local environment workaround, not
+a general restriction of LightGBM.
 
 ### Simple seed ensembles
 
@@ -277,12 +275,12 @@ writing are disabled by default.
 
 </details>
 
-The implementation uses sklearn's
+I use sklearn's
 [VotingClassifier](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.VotingClassifier.html)
 and [StackingClassifier](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.StackingClassifier.html).
-No extra model wrapper or dependency is added. All three methods use the same
-member seeds for a given `base.seed` and ensemble size. CV scores the complete
-ensemble, not an average of member accuracies. The saved pipeline includes all
+All three methods use the same member seeds for a given `base.seed` and ensemble
+size. CV scores the complete ensemble, not an average of member accuracies.
+The saved pipeline includes all
 members and the stacking meta-model, so predict mode needs only `model.joblib`.
 Earlier soft-voting artifacts saved with BaggingClassifier remain loadable;
 new runs use the common seed assignment for all three methods.
@@ -343,8 +341,8 @@ model parameters; member seeds are recorded separately.
 
 ## Features and evaluation
 
-The default representation uses `Pclass`, `Age`, `SibSp`, `Parch`, `Fare`, `Sex`,
-`Embarked`, plus two row-wise features from the original notebook: `Title` extracts
+I use `Pclass`, `Age`, `SibSp`, `Parch`, `Fare`, `Sex`, `Embarked`, plus two
+row-wise features from my original notebook: `Title` extracts
 an honorific from `Name`, and `FamilySize` counts the passenger and accompanying
 relatives. Both are computed identically for train and test. Other existing
 feature sets remain available through `features.feature_set`; additional features
@@ -352,13 +350,13 @@ are not generated automatically.
 
 Numeric missing values use a median imputer. Categorical missing values use a
 most-frequent imputer followed by an encoder that handles unseen categories.
-Scaling is optional and enabled for the logistic baseline. Every learned
+I enable scaling for logistic regression and KNN. Every learned
 transform lives inside the sklearn pipeline and is fitted on that fold's
 training rows. Row-wise feature extraction itself learns no statistics.
 
-The original stratified 80/20 split and seed are preserved: 712 development and
-179 holdout rows for the supplied train CSV. The previously viewed holdout is
-excluded from evaluation and tuning. Validation uses row-level stratification;
+I keep my original stratified 80/20 split and seed: 712 development and 179
+holdout rows for the train CSV. I exclude the previously viewed holdout from
+evaluation and tuning. Validation uses row-level stratification;
 generalization to entirely new families or tickets would require a separate
 group-based protocol.
 
@@ -367,8 +365,8 @@ group-based protocol.
 | `false` | Fixed YAML parameters | Ordinary 5-fold CV on development; no inner search folds or Optuna |
 | `true` (current config) | Optuna on 3 inner folds per outer train | Nested 5-fold outer CV on development |
 
-The current search budget is 60 trials per outer fold, followed by one separate
-60-trial final search. Earlier saved GB runs used 20 or 50 trials. Inner selection
+I currently use 60 trials per outer fold, followed by one separate 60-trial final
+search. My earlier GB runs used 20 or 50 trials. Inner selection
 accuracy is recorded separately from outer accuracy. Outer OOF predictions cover each
 development passenger exactly once, from a model that did not train on that row.
 Fold models are saved and reloaded before scoring. Mean fold accuracy, fold SD
@@ -418,7 +416,7 @@ identical outer folds. Inner selection scores never determine the ranking.
 
 ## Project code
 
-The working functions are grouped by task: [data](src/data.py),
+I group the working functions by task: [data](src/data.py),
 [features](src/features.py), [models](src/models.py), [training](src/training.py),
 and [evaluation](src/evaluation.py). Config-based object construction lives in
 [utils](src/utils.py): `get_model`, `get_pipeline` and `get_search_space` are used
@@ -429,9 +427,9 @@ optimizer. [run.py](run.py) connects the stages;
 [compare.py](compare.py) reads reports without training. Paths and seeds come
 from the config; model artifacts and generated reports are ignored by Git.
 
-The existing notebooks and saved results remain intact. The four-model nested
-comparison is still available in [notebook 05](notebooks/05_nested_comparison.py)
+I keep my earlier experiments and saved results in the notebooks. My four-model
+nested comparison is available in [notebook 05](notebooks/05_nested_comparison.py)
 through its `RUN_FULL` switch. Its MLP keeps a separate internal
 stopping split inside each outer train; larger DNN and embedding experiments
-remain in notebook 04. Earlier selection scores and holdout maxima are historical,
-not independent evidence for the new pipeline.
+remain in notebook 04. I treat earlier selection scores and holdout maxima as
+historical results, rather than independent evidence for the current pipeline.
