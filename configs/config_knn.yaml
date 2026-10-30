@@ -1,0 +1,56 @@
+# Copy to config.yaml, then run: uv run python run.py
+base:
+  exp_name: knn_baseline
+  seed: 0xFACED
+  run_kind: full
+
+run:
+  mode: full
+  model_path: null
+
+data:
+  train_path: data/titanic/train.csv
+  test_path: data/titanic/test.csv
+
+features:
+  feature_set: base_title_family
+
+preprocessing:
+  encoding: onehot
+  scale: true  # KNN uses distances.
+
+model:
+  name: KNeighborsClassifier
+  params:
+    n_neighbors: 15
+    weights: distance
+    metric: minkowski
+    p: 2  # 1 = Manhattan, 2 = Euclidean.
+    n_jobs: 1
+
+ensemble:
+  n_models: 1  # KNN has no seed-based variation; keep one model.
+  method: soft
+  stacking_folds: 3
+  meta_model:
+    name: LogisticRegression
+    params: {C: 1.0, max_iter: 2000}
+
+validation:
+  development_size: 0.8
+  n_splits: 5
+  inner_splits: 3
+
+tuning:
+  enabled: false  # Set true to use Optuna; use a new exp_name for the tuned run.
+  n_trials: 20  # Per outer fold, plus one separate final search.
+  search_space:
+    n_neighbors: {type: int, low: 3, high: 31, step: 2}
+    weights: {type: categorical, choices: [uniform, distance]}
+    p: {type: categorical, choices: [1, 2]}
+
+metric:
+  name: accuracy
+
+output:
+  dir: artifacts

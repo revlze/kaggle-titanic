@@ -1,0 +1,67 @@
+# Copy to config.yaml, then run: uv run python run.py
+base:
+  exp_name: dnn_baseline
+  seed: 0xFACED
+  run_kind: full
+
+run:
+  mode: full
+  model_path: null  # For predict, point to model.pt from a saved DNN run.
+
+data:
+  train_path: data/titanic/train.csv
+  test_path: data/titanic/test.csv
+
+features:
+  feature_set: base_title_family
+
+preprocessing:
+  encoding: onehot
+  scale: true
+
+model:
+  name: custom/MyModel
+  params:
+    out: 1  # Raw logit; inp is inferred from fitted preprocessing.
+    hidden_sizes: [64, 32]
+    dropout: 0.1
+
+loss:
+  name: BCEWithLogitsLoss
+  params: {}
+
+optimizer:
+  name: AdamW
+  params: {lr: 0.001, weight_decay: 0.001}
+
+scheduler:
+  name: ReduceLROnPlateau
+  params: {patience: 3, factor: 0.5}
+
+training:
+  epochs: 30
+  batch_size: 64
+  device: cpu  # cpu, cuda or mps, depending on available hardware.
+
+ensemble:
+  n_models: 1
+
+validation:
+  development_size: 0.8
+  n_splits: 5
+  inner_splits: 3
+  stopping_size: 0.2  # Internal stopping split; never the outer evaluation fold.
+
+tuning:
+  enabled: false
+  n_trials: 20
+  search_space:  # DNN keys use model.*, optimizer.* or scheduler.*.
+    model.dropout: {type: float, low: 0.0, high: 0.3}
+    optimizer.lr: {type: float, low: 0.0001, high: 0.01, log: true}
+    optimizer.weight_decay: {type: float, low: 0.00001, high: 0.01, log: true}
+
+metric:
+  name: accuracy
+
+output:
+  dir: artifacts

@@ -34,7 +34,7 @@ ensemble:
   meta_model:  # Used only by stacking.
     name: LogisticRegression
     params: {C: 1.0, max_iter: 2000}
-  # All copies use model.name/model.params. CatBoost and XGBoost examples are in README.
+  # All copies use model.name/model.params. Model examples are in configs/.
 
 validation:
   development_size: 0.8
@@ -45,7 +45,7 @@ tuning:
   enabled: true
   n_trials: 60  # Per outer fold, plus one separate search for final training.
   # Native model parameters, without model__. Replace when changing model.name.
-  # Model-specific ranges and ensemble examples are in README.
+  # Model-specific ranges and ensemble settings are in configs/.
   search_space:
     n_neighbors: {type: int, low: 3, high: 31, step: 2}
     weights: {type: categorical, choices: [uniform, distance]}
@@ -56,6 +56,3 @@ metric:
 
 output:
   dir: artifacts
-
-comparison:
-  runs: []  # Run folders, e.g. artifacts/gb_v1/<run_id> and artifacts/lr_v1/<run_id>.

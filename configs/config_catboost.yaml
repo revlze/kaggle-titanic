@@ -1,0 +1,59 @@
+# Copy to config.yaml, then run: uv run python run.py
+base:
+  exp_name: catboost_baseline
+  seed: 0xFACED
+  run_kind: full
+
+run:
+  mode: full
+  model_path: null
+
+data:
+  train_path: data/titanic/train.csv
+  test_path: data/titanic/test.csv
+
+features:
+  feature_set: base_title_family
+
+preprocessing:
+  encoding: onehot  # Uses the existing pipeline, not native categorical handling.
+  scale: false
+
+model:
+  name: CatBoostClassifier
+  params:
+    loss_function: Logloss
+    iterations: 300
+    depth: 4
+    learning_rate: 0.05
+    l2_leaf_reg: 3.0
+    thread_count: 1
+    random_state: ${base.seed}
+
+ensemble:
+  n_models: 1  # Set to 5 for five models with different seeds.
+  method: soft  # soft, hard, stacking
+  stacking_folds: 3
+  meta_model:
+    name: LogisticRegression
+    params: {C: 1.0, max_iter: 2000}
+
+validation:
+  development_size: 0.8
+  n_splits: 5
+  inner_splits: 3
+
+tuning:
+  enabled: false  # Set true to use Optuna; use a new exp_name for the tuned run.
+  n_trials: 20  # Per outer fold, plus one separate final search.
+  search_space:
+    iterations: {type: int, low: 200, high: 600, step: 100}
+    depth: {type: int, low: 3, high: 6}
+    learning_rate: {type: float, low: 0.02, high: 0.1, log: true}
+    l2_leaf_reg: {type: float, low: 1.0, high: 10.0, log: true}
+
+metric:
+  name: accuracy
+
+output:
+  dir: artifacts

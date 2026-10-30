@@ -1,0 +1,73 @@
+# Copy to config.yaml, then run: uv run python run.py
+base:
+  exp_name: dnn_embedding_baseline
+  seed: 0xFACED
+  run_kind: full
+
+run:
+  mode: full
+  model_path: null  # For predict, point to model.pt from a saved DNN run.
+
+data:
+  train_path: data/titanic/train.csv
+  test_path: data/titanic/test.csv
+
+features:
+  feature_set: all  # Includes Cabin and Ticket for the original five embeddings.
+
+preprocessing:
+  encoding: ordinal  # Category IDs for embeddings, not one-hot columns.
+  scale: true
+
+model:
+  name: custom/MyModelEmb
+  params:
+    out: 1
+    hidden_sizes: [64, 32]
+    dropout: 0.1
+    sex_emb_dim: 2
+    embarked_emb_dim: 2
+    cabin_emb_dim: 2
+    ticket_emb_dim: 2
+    title_emb_dim: 2
+    # inp, category sizes and slices are inferred inside each training fold.
+
+loss:
+  name: BCEWithLogitsLoss
+  params: {}
+
+optimizer:
+  name: AdamW
+  params: {lr: 0.001, weight_decay: 0.001}
+
+scheduler:
+  name: ReduceLROnPlateau
+  params: {patience: 3, factor: 0.5}
+
+training:
+  epochs: 30
+  batch_size: 64
+  device: cpu
+
+ensemble:
+  n_models: 1
+
+validation:
+  development_size: 0.8
+  n_splits: 5
+  inner_splits: 3
+  stopping_size: 0.2
+
+tuning:
+  enabled: false
+  n_trials: 20
+  search_space:
+    model.dropout: {type: float, low: 0.0, high: 0.3}
+    optimizer.lr: {type: float, low: 0.0001, high: 0.01, log: true}
+    optimizer.weight_decay: {type: float, low: 0.00001, high: 0.01, log: true}
+
+metric:
+  name: accuracy
+
+output:
+  dir: artifacts
