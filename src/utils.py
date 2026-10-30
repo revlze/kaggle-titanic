@@ -11,6 +11,7 @@ from sklearn.base import clone
 from sklearn.ensemble import BaggingClassifier, GradientBoostingClassifier, StackingClassifier, VotingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import StratifiedKFold
+from sklearn.neighbors import KNeighborsClassifier
 from sklearn.pipeline import Pipeline
 from xgboost import XGBClassifier
 from catboost import CatBoostClassifier
@@ -59,6 +60,7 @@ def get_model(config, *, load_pretrained=True):
         'XGBClassifier': XGBClassifier,
         'CatBoostClassifier': CatBoostClassifier,
         'LGBMClassifier': LGBMClassifier,
+        'KNeighborsClassifier': KNeighborsClassifier,
     }
     if config.model.name in classifiers:
         if config.model.name == 'CatBoostClassifier':
@@ -67,7 +69,8 @@ def get_model(config, *, load_pretrained=True):
                 params['random_state'] = params.pop('random_seed')
             params.setdefault('verbose', False)
             params.setdefault('allow_writing_files', False)
-        params.setdefault('random_state', config.base.seed)
+        if config.model.name != 'KNeighborsClassifier':
+            params.setdefault('random_state', config.base.seed)
         model = classifiers[config.model.name](**params)
     elif config.model.name.startswith('custom/'):
         # Import here because models.py also exposes the original helper names.
@@ -84,12 +87,15 @@ def get_pipeline(config, train_dataset):
     '''Build the classical pipeline using the existing config-based model getter.'''
     if config.model.name not in {
         'GradientBoostingClassifier', 'LogisticRegression', 'CatBoostClassifier', 'XGBClassifier', 'LGBMClassifier',
+        'KNeighborsClassifier',
     }:
         raise ValueError(f'Unsupported classical model: {config.model.name}')
     model = get_model(config)
     n_models = OmegaConf.select(config, 'ensemble.n_models', default=1)
     if type(n_models) is not int or n_models < 1:
         raise ValueError('ensemble.n_models must be a positive integer')
+    if config.model.name == 'KNeighborsClassifier' and n_models > 1:
+        raise ValueError('KNeighborsClassifier has no random seed; use ensemble.n_models: 1 instead of identical copies')
     method = OmegaConf.select(config, 'ensemble.method', default='soft')
     if method not in {'soft', 'hard', 'stacking'}:
         raise ValueError('ensemble.method must be soft, hard or stacking')

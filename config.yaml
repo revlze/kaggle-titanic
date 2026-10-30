@@ -1,5 +1,5 @@
 base:
-  exp_name: lgbm_1_tuned
+  exp_name: knn_1_tuned
   seed: 0xFACED
   run_kind: full  # Use smoke for short protocol checks; do not rank smoke scores.
 
@@ -16,29 +16,16 @@ features:
 
 preprocessing:
   encoding: onehot
-  scale: false  # Tree models do not require feature scaling.
+  scale: true  # KNN distances depend on the scale of numeric features.
 
 model:
-  name: LGBMClassifier
+  name: KNeighborsClassifier
   params:
-    n_estimators: 300  # Number of boosting rounds.
-    learning_rate: 0.05  # Contribution of each new tree.
-    num_leaves: 15  # Main tree-complexity limit in LightGBM.
-    max_depth: 4  # Fixed while tuning num_leaves; depth 4 permits at most 16 leaves.
-    min_child_samples: 20  # Discourage leaves with too few observations.
-    subsample: 0.8  # Fraction of rows sampled per boosting iteration.
-    subsample_freq: 1  # Required to activate row subsampling.
-    colsample_bytree: 0.8  # Fraction of features sampled per tree.
-    reg_lambda: 3.0  # L2 regularization of leaf weights.
-    reg_alpha: 0.0  # L1 regularization; disabled for this starting configuration.
-    objective: binary
-    metric: binary_logloss  # Native metric; project CV still optimizes accuracy.
-    device_type: cpu
-    deterministic: true  # Stable CPU training with fixed data, parameters and seed.
-    force_col_wise: true  # Fixed histogram strategy for deterministic training.
-    verbosity: -1
-    n_jobs: 1  # Single-threaded: local macOS runtime crashes with four threads.
-    random_state: ${base.seed}
+    n_neighbors: 15  # Number of nearby training passengers.
+    weights: distance  # Closer neighbors have more influence.
+    metric: minkowski
+    p: 2  # 1 = Manhattan distance, 2 = Euclidean distance.
+    n_jobs: 1
 
 ensemble:
   n_models: 1  # 1 = single model; 5 = five copies with different seeds.
@@ -60,13 +47,9 @@ tuning:
   # Native model parameters, without model__. Replace when changing model.name.
   # Model-specific ranges and ensemble examples are in README.
   search_space:
-    n_estimators: {type: int, low: 100, high: 500, step: 50}
-    learning_rate: {type: float, low: 0.02, high: 0.1, log: true}
-    num_leaves: {type: int, low: 4, high: 15}
-    min_child_samples: {type: int, low: 10, high: 40}
-    subsample: {type: float, low: 0.7, high: 1.0}
-    colsample_bytree: {type: float, low: 0.7, high: 1.0}
-    reg_lambda: {type: float, low: 1.0, high: 10.0, log: true}
+    n_neighbors: {type: int, low: 3, high: 31, step: 2}
+    weights: {type: categorical, choices: [uniform, distance]}
+    p: {type: categorical, choices: [1, 2]}
 
 metric:
   name: accuracy
