@@ -53,9 +53,8 @@ Timestamps are preserved as displayed; their timezone is not inferred.
 
 Each description has a unique matching saved local experiment. The GB description
 `gb_v1_optuna 29oct` is associated with the **20-trial** `gb_v1_optuna` run, not
-the later 50- or 60-trial runs. Uploaded CSV bytes were not supplied, so these
-associations are based on metadata rather than proof that Kaggle scored a local
-file with the recorded hash. For KNN, the author also supplied the successful
+the later 50- or 60-trial runs. These earlier associations are based on metadata.
+For KNN, the author also supplied the successful
 submit command naming
 `artifacts/knn_1_tuned/20261030T085106_102763Z/submission.csv` and the returned
 reference 57799934. This identifies the local run explicitly; remote uploaded
@@ -63,7 +62,7 @@ bytes were not independently verified. All supplied filenames were `submission.c
 
 Local run directories follow `artifacts/<experiment>/<run_id>/`:
 
-| Experiment | Exact run ID | Associated submission |
+| Experiment identifier | Exact run ID | Associated submission |
 |---|---|---:|
 | `lr_v1` | `20261029T075746_383922Z` | 57764095 |
 | `lr_v1_tuned` | `20261029T081116_571264Z` | 57764463 |
@@ -96,21 +95,21 @@ inferred from similarly named protocols.
 | Final fit | Separate development-only search, if enabled; fresh refit on all 891 labels | No new independent score after refitting |
 
 Each development passenger has one OOF prediction. Imputation, encoding and any
-scaling are learned inside the relevant training fold. Logistic regression and KNN use
-scaling; the recorded boosting runs do not. The final tuned pipelines use a
+scaling are learned inside the relevant training fold. Logistic regression and
+KNN use scaling; the recorded boosting runs do not. The final tuned pipelines use a
 separate three-fold selection search on development, then fit all 891 labeled
 rows, including the former holdout. The test CSV is used for inference only.
 
-| Experiment | OOF accuracy, % | Final selection CV, % | Completed searches × trials |
+| Model / setup | OOF accuracy, % | Final selection CV, % | Completed searches × trials |
 |---|---:|---:|---|
-| `lr_v1` | 82.72 | Not tuned | 0 |
-| `lr_v1_tuned` | 82.30 | 83.14 | 6 × 60 |
-| `gb_v1` | 82.87 | Not tuned | 0 |
-| `gb_v1_optuna` | 83.01 | 83.99 | 6 × 20 |
-| `xgb_1_tuned` | 83.57 | 84.69 | 6 × 60 |
-| `xgb_5seeds_tuned` | 82.87 | 84.27 | 6 × 60 |
-| `lgbm_1_tuned` | 82.58 | 84.69 | 6 × 60 |
-| `knn_1_tuned` | 81.32 | 82.58 | 6 × 60 |
+| Logistic regression (baseline) | 82.72 | Not tuned | 0 |
+| Logistic regression + Optuna | 82.30 | 83.14 | 6 × 60 |
+| Gradient boosting (baseline) | 82.87 | Not tuned | 0 |
+| Gradient boosting + Optuna | 83.01 | 83.99 | 6 × 20 |
+| XGBoost + Optuna | 83.57 | 84.69 | 6 × 60 |
+| XGBoost ensemble (5 models) | 82.87 | 84.27 | 6 × 60 |
+| LightGBM + Optuna | 82.58 | 84.69 | 6 × 60 |
+| K-nearest neighbors + Optuna | 81.32 | 82.58 | 6 × 60 |
 
 The six searches are five outer-fold searches plus one separate final selection
 search. Every saved trial table contains the configured number of `COMPLETE`
@@ -121,10 +120,10 @@ because fold sizes are not identical.
 Two further completed GB runs have no associated score in the supplied CLI
 snapshot. They remain local evidence, not missing leaderboard values to infer:
 
-| Experiment | Local CV, % ± fold SD | OOF accuracy, % | Final selection CV, % |
+| Model / setup | Local CV, % ± fold SD | OOF accuracy, % | Final selection CV, % |
 |---|---:|---:|---:|
-| `gb_optuna_50trials` | 83.57 ± 3.26 | 83.57 | 84.13 |
-| `gb_optuna_60trials` | 83.85 ± 3.14 | 83.85 | 84.27 |
+| Gradient boosting + Optuna (50 trials) | 83.57 ± 3.26 | 83.57 | 84.13 |
+| Gradient boosting + Optuna (60 trials) | 83.85 ± 3.14 | 83.85 | 84.27 |
 
 These runs do not establish that increasing trials improves public accuracy.
 The protocol is stratified by row rather than grouped by family or ticket, and
@@ -133,10 +132,10 @@ about a selected winner. The historical holdout is not a fresh final test.
 
 ## Implemented versus measured
 
-The YAML runner supports LogisticRegression, sklearn GradientBoosting, CatBoost,
-XGBoost, LightGBM and KNeighborsClassifier. KNN has a completed full run and
-reported public score here, using a single model with numeric scaling. Seed ensembles for models
-with random seeds support soft voting, hard voting and stacking.
+The YAML runner supports logistic regression, gradient boosting, CatBoost,
+XGBoost, LightGBM and K-nearest neighbors. KNN has a completed full run and
+reported public score here, using a single model with numeric scaling. Seed
+ensembles for models with random seeds support soft voting, hard voting and stacking.
 Only the **five-seed XGBoost soft ensemble** has a full local run and associated
 public score in this snapshot. CatBoost, hard voting and stacking have prior
 implementation smoke checks, not full comparative results in this table.

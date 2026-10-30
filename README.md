@@ -8,8 +8,8 @@ the folds; final selection and full-data refitting are separate from evaluation.
 
 **Best reported Kaggle public accuracy: [0.77272](docs/EXPERIMENTS.md#source-and-matching-boundary)**, shared by the fixed and tuned
 logistic-regression submissions. None of the submitted alternatives exceeded
-that baseline. These are reported public scores,
-not private-test results or evidence of statistical significance.
+that baseline. These are reported public scores, not private-test results or
+evidence of statistical significance.
 
 ```mermaid
 flowchart LR
@@ -26,8 +26,8 @@ Evaluation and final fitting are separate. Optuna, when enabled, selects
 parameters using development rows; the final pipeline is then fitted afresh
 on all labeled rows. Every evaluation fit includes its own preprocessing.
 Kaggle test is read only for inference. The latest recorded submission is tuned
-KNN, while logistic regression retains the
-highest public score in the supplied submission snapshot.
+KNN, while logistic regression retains the highest public score in the supplied
+submission snapshot.
 
 ## Recorded results
 
@@ -49,7 +49,8 @@ use five-fold CV; tuned models use five outer / three inner folds on the same
 
 Public scores were supplied by the project author from Kaggle CLI output on
 2026-10-30; they were not fetched again for this documentation update. Runs are
-associated using the supplied CLI metadata; uploaded file bytes were not independently verified.
+associated using the supplied CLI metadata; uploaded file bytes were not
+independently verified.
 Private scores were blank. Exact run IDs, original submission descriptions,
 configurations, per-fold scores and local CSV hashes are retained in the
 [result snapshot](docs/experiment-results.json) and explained in the
