@@ -21,7 +21,7 @@ from sklearn.pipeline import Pipeline
 
 from features import make_features, make_preprocess
 from models import SmallMLP, comparison_search_spaces, suggest_small_mlp
-from training import fit_dnn, predict_dnn, restore_dnn, tune_classical
+from training import fit_dnn, predict_dnn, restore_dnn, tune_classical, tune_dnn
 from data import split_development
 from utils import get_model_report, predict_classifier
 
@@ -42,7 +42,7 @@ def write_run_summary(run_dir):
     parameters = training.get("parameters", {})
     # Show configured and tuned parameters; full constructor defaults stay in training.json.
     parameter_names = set(config.model.params) | {
-        name.rsplit("__", 1)[-1] for name in selection.get("best_params", {})
+        name.rsplit("__", 1)[-1].rsplit('.', 1)[-1] for name in selection.get("best_params", {})
     }
     final_parameters = {name: value for name, value in parameters.items() if name in parameter_names}
     training_config = inference.get("training_configuration", {}) if manifest["mode"] == "predict" else config
@@ -69,6 +69,8 @@ def write_run_summary(run_dir):
                                                 inference.get("probabilities_available", score.get("probabilities_available"))),
         "prediction_rows": inference.get("rows"),
     }
+    if str(metrics['model']).startswith('custom/'):
+        metrics.update(final_training_epochs=training.get('epochs'), final_optimizer=training.get('optimizer'))
     (run_dir / "metrics.json").write_text(json.dumps(metrics, indent=2))
     lines = [
         f"# {manifest['exp_name']}", "",
@@ -108,6 +110,11 @@ def write_run_summary(run_dir):
         lines += ["CV accuracy: **not evaluated in this run**.", ""]
     if training:
         lines += ["## Final model", ""]
+        if 'epochs' in training:
+            lines += [f"Epochs: **{training['epochs']}**. The epoch count and learning-rate schedule were "
+                      "selected on internal development validation, then replayed during a fresh full-data refit.", "",
+                      "Optimizer:", "", "```yaml", OmegaConf.to_yaml(OmegaConf.create(training['optimizer'])).rstrip(),
+                      "```", ""]
         if metrics["final_selection_cv_accuracy"] is not None:
             lines += [
                 f"Final Optuna selection CV accuracy: **{metrics['final_selection_cv_accuracy']:.2%}**.", "",
@@ -137,6 +144,8 @@ def write_run_summary(run_dir):
         ("evaluation/results.json", "Detailed evaluation protocol and fold parameters"),
         ("evaluation/oof.csv", "Out-of-fold predictions"),
         ("model.joblib", "Final saved model"),
+        ("model.pt", "Final PyTorch weights and architecture"),
+        ("preprocess.joblib", "Fitted preprocessing for the PyTorch model"),
         ("config.yaml", "Resolved run configuration"),
     ]:
         if (run_dir / path).exists():
@@ -210,20 +219,20 @@ def plot_comparison(summary, oof, run_kind="full", feature_set="base_title_famil
 def run_cv_experiment(train_dataset, model_specs, results_path, *, feature_set,
                           seed, n_trials=20, epochs=30, run_kind="full", device="cpu",
                           tune=True, development_size=0.8, n_splits=5, inner_splits=3,
-                          output_dir=None):
+                          output_dir=None, batch_size=64, stopping_size=0.2):
     """Only the development set enters evaluation fits or hyperparameter search.
 
     Classical specs contain estimator/distributions; DNN specs contain
-    model_cls/preprocess/suggest_params and optional embedding_columns.
+    model_cls/preprocess/suggest_params and optional embedding_columns;
+    fixed DNN evaluation takes parameters from spec['configuration'].
     The larger notebook DNNs can use the same evaluation without changing
     their architectures. Holdout labels are used only to stratify the split.
-    With tune=False, classical estimators run ordinary CV without inner folds.
+    With tune=False, models run ordinary CV without inner search folds.
+    DNNs keep an internal stopping split separate from evaluation folds.
     Existing notebook calls retain the nested-CV defaults.
     """
     if (tune and n_trials < 1) or epochs < 1:
         raise ValueError("n_trials and epochs must be positive")
-    if not tune and any(spec["kind"] != "classical" for spec in model_specs.values()):
-        raise ValueError("Fixed-parameter evaluation here supports classical estimators only")
     X, _, _ = make_features(train_dataset, feature_set)
     y = train_dataset["Survived"].to_numpy()
     train_i, holdout_i, outer_splits = make_cv_plan(y, seed, development_size, n_splits)
@@ -242,7 +251,7 @@ def run_cv_experiment(train_dataset, model_specs, results_path, *, feature_set,
         "dnn_max_epochs": epochs, "device": device,
         "protocol": f"stratified_{development_size:g}_{evaluation_kind}_outer{n_splits}_inner{inner_splits if tune else 0}_v1",
         "cv": {"outer_folds": n_splits, "inner_folds": inner_splits if tune else 0, "shuffle": True,
-               "outer_dnn_internal_validation_fraction": 0.2, "std_ddof": 0},
+               "outer_dnn_internal_validation_fraction": stopping_size, "std_ddof": 0},
         "holdout_role": "previously_viewed_exploratory_holdout_not_evaluated",
         "train_indices": train_i.tolist(), "holdout_indices": holdout_i.tolist(),
         "train_passenger_ids": train_dataset[train_i]["PassengerId"].to_list(),
@@ -268,7 +277,7 @@ def run_cv_experiment(train_dataset, model_specs, results_path, *, feature_set,
     oof_rows, fold_records, summary = [], [], []
     for name, spec in model_specs.items():
         model_dir = run_dir / name
-        model_dir.mkdir()
+        model_dir.mkdir(parents=True)
         model_scores, selection_scores = [], []
         for fold, (fit, val) in enumerate(outer_splits, start=1):
             fold_seed = seed + fold
@@ -302,45 +311,27 @@ def run_cv_experiment(train_dataset, model_specs, results_path, *, feature_set,
                 record.update(checkpoint=str(saved_path.relative_to(run_dir)),
                               estimator_params=model_report["parameters"], ensemble=model_report["ensemble"])
             elif spec["kind"] == "dnn":
-                study = optuna.create_study(
-                    direction="maximize", sampler=optuna.samplers.TPESampler(seed=fold_seed),
-                    pruner=optuna.pruners.NopPruner(),
-                )
-                def objective(trial):
-                    configuration = spec["suggest_params"](trial)
-                    trial.set_user_attr("configuration", configuration)
-                    scores, best_epochs = [], []
-                    for inner_fold, (a, b) in enumerate(inner, start=1):
-                        fitted = fit_dnn(
-                            spec["model_cls"], configuration, spec["preprocess"],
-                            X_fit[a], y_fit[a], X_fit[b], y_fit[b],
-                            seed=fold_seed * 10 + inner_fold, epochs=epochs,
-                            embedding_columns=spec.get("embedding_columns"), device=device,
-                        )
-                        inner_predictions, _ = predict_dnn(fitted["model"], fitted["preprocess"], X_fit[b], device)
-                        scores.append(float(accuracy_score(y_fit[b], inner_predictions)))
-                        best_epochs.append(fitted["best_epoch"])
-                    trial.set_user_attr("inner_best_epochs", best_epochs)
-                    trial.set_user_attr("inner_fold_scores", scores)
-                    return float(np.mean(scores))
-
-                study.optimize(objective, n_trials=n_trials)
-                configuration = study.best_trial.user_attrs["configuration"]
+                if tune:
+                    study = tune_dnn(spec, X_fit, y_fit, inner, seed=fold_seed, n_trials=n_trials,
+                                     epochs=epochs, device=device, batch_size=batch_size, stopping_size=stopping_size)
+                    configuration = study.best_trial.user_attrs['configuration']
+                else:
+                    configuration = spec['configuration']
                 # The outer training rows supply BOTH fit and stopping subsets.
-                a, b = train_test_split(np.arange(len(fit)), test_size=0.2,
+                a, b = train_test_split(np.arange(len(fit)), test_size=stopping_size,
                                         stratify=y_fit, random_state=fold_seed)
                 assert not set(fit[a]) & set(val)
                 assert not set(fit[b]) & set(val)
                 fitted = fit_dnn(
                     spec["model_cls"], configuration, spec["preprocess"],
                     X_fit[a], y_fit[a], X_fit[b], y_fit[b], seed=fold_seed,
-                    epochs=epochs, embedding_columns=spec.get("embedding_columns"), device=device,
+                    epochs=epochs, embedding_columns=spec.get("embedding_columns"), device=device, batch_size=batch_size,
                 )
                 saved_path = model_dir / f"fold_{fold}.pt"
                 preprocess_path = model_dir / f"fold_{fold}_preprocess.joblib"
                 checkpoint = {
                     "model_state_dict": fitted["model"].state_dict(),
-                    "model_class": spec["model_cls"].__name__,
+                    "model_class": spec["model_cls"] if isinstance(spec["model_cls"], str) else spec["model_cls"].__name__,
                     "model_params": fitted["model_params"], "embedding_metadata": fitted["embedding_metadata"],
                     "configuration": configuration, "seed": fold_seed,
                     "best_epoch": fitted["best_epoch"], "weights_epoch": fitted["weights_epoch"],
@@ -361,7 +352,8 @@ def run_cv_experiment(train_dataset, model_specs, results_path, *, feature_set,
                 assert np.array_equal(predictions, original_predictions)
                 assert np.array_equal(probabilities, original_probabilities)
                 record.update(
-                    inner_selection_accuracy=float(study.best_value), best_params=study.best_params,
+                    inner_selection_accuracy=float(study.best_value) if study is not None else None,
+                    best_params=study.best_params if study is not None else {},
                     configuration=configuration, checkpoint=str(saved_path.relative_to(run_dir)),
                     preprocessing=str(preprocess_path.relative_to(run_dir)),
                     fit_source_indices=train_i[fit[a]].tolist(), stop_source_indices=train_i[fit[b]].tolist(),

@@ -1,5 +1,6 @@
 import os
 import random
+import copy
 
 import torch
 import torch.nn as nn
@@ -51,9 +52,10 @@ def get_scheduler(config, optimizer):
         optimizer, **config.scheduler.params,
     )
 
-def get_model(config, *, load_pretrained=True):
+def get_model(config, *, load_pretrained=True, **runtime_params):
     '''Get a configured sklearn classifier, custom PyTorch model or torchvision model.'''
     params = OmegaConf.to_container(config.model.params, resolve=True)
+    params.update(runtime_params)
     classifiers = {
         'GradientBoostingClassifier': GradientBoostingClassifier,
         'LogisticRegression': LogisticRegression,
@@ -129,6 +131,60 @@ def get_pipeline(config, train_dataset):
         ('preprocess', preprocess),
         ('model', model),
     ])
+
+def get_dnn_spec(config, train_dataset):
+    '''Build a custom DNN specification using the same YAML object getters.'''
+    import models
+    model_class = getattr(models, config.model.name.removeprefix('custom/'))
+    if not isinstance(model_class, type) or not issubclass(model_class, nn.Module):
+        raise ValueError('custom/ must name a torch.nn.Module in models.py')
+    if OmegaConf.select(config, 'ensemble.n_models', default=1) != 1:
+        raise ValueError('Custom DNNs currently support ensemble.n_models: 1')
+    if config.loss.name != 'BCEWithLogitsLoss':
+        raise ValueError('Binary DNNs use BCEWithLogitsLoss and one output logit')
+    _, numeric, categorical = make_features(train_dataset, config.features.feature_set)
+    embedding_columns = None
+    if issubclass(model_class, models.MyModelEmb):
+        if categorical != ['Sex', 'Embarked', 'Cabin', 'Ticket', 'Title'] or config.preprocessing.encoding != 'ordinal':
+            raise ValueError('MyModelEmb requires features.feature_set: all and preprocessing.encoding: ordinal')
+        embedding_columns = [name.lower() for name in categorical]
+    scheduler = OmegaConf.to_container(config.scheduler, resolve=True) if config.scheduler is not None else {}
+    configuration = {
+        'model_params': OmegaConf.to_container(config.model.params, resolve=True),
+        'loss_name': config.loss.name, 'loss_params': OmegaConf.to_container(config.loss.params, resolve=True),
+        'optimizer_name': config.optimizer.name,
+        'optimizer_params': OmegaConf.to_container(config.optimizer.params, resolve=True),
+        'scheduler_name': scheduler.get('name'), 'scheduler_params': scheduler.get('params', {}),
+    }
+    if configuration['model_params'].get('out', 1) != 1:
+        raise ValueError('Binary DNNs require model.params.out: 1')
+    space = OmegaConf.to_container(config.tuning.search_space, resolve=True)
+    sections = {'model': 'model_params', 'optimizer': 'optimizer_params', 'scheduler': 'scheduler_params'}
+    for key, settings in space.items():
+        section, separator, parameter = key.partition('.')
+        if not separator or section not in sections or not parameter:
+            raise ValueError(f'DNN tuning key must be model.*, optimizer.* or scheduler.*: {key}')
+        if settings['type'] not in {'int', 'float', 'categorical'}:
+            raise ValueError(f'Unknown distribution type: {settings["type"]}')
+        if key in {'model.inp', 'model.out'}:
+            raise ValueError('DNN input/output sizes are fixed by preprocessing and binary classification')
+    if config.tuning.enabled and not space:
+        raise ValueError('Optuna requires a non-empty tuning.search_space')
+
+    def suggest_params(trial):
+        candidate = copy.deepcopy(configuration)
+        for key, settings in space.items():
+            section, parameter = key.split('.', 1)
+            settings = settings.copy()
+            kind = settings.pop('type')
+            candidate[sections[section]][parameter] = getattr(trial, f'suggest_{kind}')(key, **settings)
+        return candidate
+
+    return {
+        'kind': 'dnn', 'model_cls': config.model.name, 'configuration': configuration,
+        'preprocess': make_preprocess(numeric, categorical, **config.preprocessing),
+        'embedding_columns': embedding_columns, 'suggest_params': suggest_params,
+    }
 
 def get_model_report(model):
     '''Return JSON-ready base parameters and the actual fitted ensemble seeds.'''
