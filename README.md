@@ -1,14 +1,14 @@
 # Titanic: a configurable classical ML pipeline
 
 Predict passenger survival with a small, explicit sklearn pipeline. Supported
-models are `LogisticRegression`, `GradientBoostingClassifier`, `CatBoostClassifier`,
-`XGBClassifier` and `LGBMClassifier`. One YAML file controls features, evaluation,
+models are logistic regression, gradient boosting, CatBoost, XGBoost, LightGBM
+and K-nearest neighbors (KNN). One YAML file controls features, evaluation,
 Optuna and a single model or seed ensemble. Learned preprocessing stays inside
 the folds; final selection and full-data refitting are separate from evaluation.
 
 **Best reported Kaggle public accuracy: [0.77272](docs/EXPERIMENTS.md#source-and-matching-boundary)**, shared by the fixed and tuned
-logistic-regression submissions. The submitted boosting runs and five-seed
-XGBoost ensemble did not exceed that baseline. These are reported public scores,
+logistic-regression submissions. None of the submitted alternatives exceeded
+that baseline. These are reported public scores,
 not private-test results or evidence of statistical significance.
 
 ```mermaid
@@ -25,8 +25,8 @@ flowchart LR
 Evaluation and final fitting are separate. Optuna, when enabled, selects
 parameters using development rows; the final pipeline is then fitted afresh
 on all labeled rows. Every evaluation fit includes its own preprocessing.
-Kaggle test is read only for inference. The current config runs a single tuned
-LightGBM; this is the active experiment, while logistic regression retains the
+Kaggle test is read only for inference. The latest recorded submission is tuned
+KNN, while logistic regression retains the
 highest public score in the supplied submission snapshot.
 
 ## Recorded results
@@ -36,28 +36,33 @@ percentage points**; public scores are fractions on the 0–1 scale. Fixed model
 use five-fold CV; tuned models use five outer / three inner folds on the same
 712 development rows. SD is not a confidence interval.
 
-| Experiment | Optuna trials / search | Local CV, % ± SD | Public accuracy | Submission ID |
+| Model / setup | Optuna trials / search | Local CV, % ± SD | Public accuracy | Submission ID |
 |---|---:|---:|---:|---:|
-| `lr_v1` | 0 | 82.72 ± 2.15 | **0.77272** | 57764095 |
-| `lr_v1_tuned` | 60 | 82.30 ± 2.44 | **0.77272** | 57764463 |
-| `gb_v1` | 0 | 82.86 ± 1.71 | 0.76076 | 57764134 |
-| `gb_v1_optuna` | 20 | 83.00 ± 2.10 | 0.75837 | 57760541 |
-| `xgb_1_tuned` | 60 | 83.56 ± 3.24 | 0.75837 | 57797886 |
-| `xgb_5seeds_tuned` | 60 | 82.87 ± 2.62 | 0.75598 | 57797655 |
-| `lgbm_1_tuned` | 60 | 82.58 ± 2.81 | 0.76076 | 57798445 |
+| Logistic regression (baseline) | 0 | 82.72 ± 2.15 | **0.77272** | 57764095 |
+| Logistic regression + Optuna | 60 | 82.30 ± 2.44 | **0.77272** | 57764463 |
+| Gradient boosting (baseline) | 0 | 82.86 ± 1.71 | 0.76076 | 57764134 |
+| Gradient boosting + Optuna | 20 | 83.00 ± 2.10 | 0.75837 | 57760541 |
+| XGBoost + Optuna | 60 | 83.56 ± 3.24 | 0.75837 | 57797886 |
+| XGBoost ensemble (5 models) | 60 | 82.87 ± 2.62 | 0.75598 | 57797655 |
+| LightGBM + Optuna | 60 | 82.58 ± 2.81 | 0.76076 | 57798445 |
+| K-nearest neighbors + Optuna | 60 | 81.32 ± 3.13 | 0.75837 | 57799934 |
 
 Public scores were supplied by the project author from Kaggle CLI output on
 2026-10-30; they were not fetched again for this documentation update. Runs are
-associated by experiment description; uploaded file bytes were not verified.
+associated using the supplied CLI metadata; uploaded file bytes were not independently verified.
 Private scores were blank. Exact run IDs, original submission descriptions,
 configurations, per-fold scores and local CSV hashes are retained in the
 [result snapshot](docs/experiment-results.json) and explained in the
 [experiment notes](docs/EXPERIMENTS.md).
 
-![Local CV mean and fold SD versus reported public accuracy for seven submissions.](docs/figures/accuracy-comparison.svg)
+![Local CV mean and fold SD versus reported public accuracy for eight submissions.](docs/figures/accuracy-comparison.svg)
 
 The figure compares different evaluation populations. Local scores come from
 saved CV reports and OOF predictions.
+
+Tuned KNN recorded **81.32% ± 3.13 pp** local CV and **0.75837** public accuracy.
+Final selection chose 23 neighbors, uniform weights and Euclidean distance.
+This run did not exceed the logistic-regression reference on either metric.
 
 Optuna did not improve the reported logistic-regression public score. The
 five-seed XGBoost procedure recorded lower CV and public accuracy than the single
@@ -90,7 +95,7 @@ Each run creates `artifacts/<exp_name>/<UTC timestamp>/`; earlier runs are prese
 | `run.model_path` | Saved `model.joblib`, required for `predict` |
 | `data.train_path`, `data.test_path` | CSV locations |
 | `features.feature_set` | `base_title_family` by default |
-| `preprocessing` | One-hot encoding; scaling enabled for the logistic baseline |
+| `preprocessing` | One-hot encoding; enable scaling for logistic regression and KNN |
 | `model.name`, `model.params` | Classifier and native constructor parameters |
 | `ensemble` | Member count, soft/hard voting or stacking, OOF folds and meta-model |
 | `validation` | Development fraction, evaluation folds and inner search folds |
@@ -141,18 +146,63 @@ search_space:
 
 </details>
 
+<details>
+<summary>Configure K-nearest neighbors (KNN)</summary>
+
+Replace the corresponding blocks in `config.yaml`:
+
+```yaml
+base:
+  exp_name: knn_v1
+  seed: 0xFACED
+  run_kind: full
+model:
+  name: KNeighborsClassifier
+  params:
+    n_neighbors: 15
+    weights: distance
+    metric: minkowski
+    p: 2
+    n_jobs: 1
+preprocessing:
+  encoding: onehot
+  scale: true
+ensemble:
+  n_models: 1
+tuning:
+  enabled: false
+  n_trials: 20
+  search_space:
+    n_neighbors: {type: int, low: 3, high: 31, step: 2}
+    weights: {type: categorical, choices: [uniform, distance]}
+    p: {type: categorical, choices: [1, 2]}
+```
+
+KNN uses distances, so numeric scaling should be enabled inside the fold's
+pipeline. `n_neighbors` controls how many nearby passengers vote; `weights:
+distance` gives closer passengers more weight. With `metric: minkowski`, `p: 1`
+is Manhattan distance and `p: 2` is Euclidean distance. These are starting settings,
+not a measured improvement. See the
+[KNeighborsClassifier parameters](https://scikit-learn.org/stable/modules/generated/sklearn.neighbors.KNeighborsClassifier.html).
+
+KNN has no `random_state`; omit that parameter and use one model. The current
+ensemble option varies only seeds, so multiple copies of the same KNN would be
+identical and are rejected. To tune KNN, enable `tuning.enabled` and keep the
+KNN-specific search space above, using a new experiment name such as `knn_v1_tuned`.
+
+</details>
+
 Search keys are native model parameters; code supplies the sklearn nesting and
 applies a shared setting to all ensemble members. Replace the whole search space
 when changing model families. Saved run configurations and final effective
 parameters are different: Optuna replaces searched settings during final selection.
 
-The checked-in configuration currently uses `LGBMClassifier`, one model and
-60 Optuna trials per search. It starts with 300 boosting rounds, learning rate
-0.05, at most 15 leaves and depth 4. Its search varies `num_leaves` while keeping
-depth fixed, and `subsample_freq: 1` activates row subsampling. Native LightGBM
-log loss is distinct from the accuracy optimized by project CV.
+The checked-in configuration currently uses `KNeighborsClassifier`, one model,
+numeric scaling and 60 Optuna trials per search. It starts with 15 neighbors,
+distance weights and Euclidean distance. Search varies the neighbor count,
+uniform/distance weights and Manhattan/Euclidean distance.
 
-LightGBM uses `n_jobs: 1` in this local configuration because native crashes were
+The recorded LightGBM run used `n_jobs: 1` because native crashes were
 observed with four threads in the mixed-library macOS environment. This is a local
 environment workaround, not a general restriction of LightGBM.
 
@@ -165,6 +215,7 @@ The default is `soft`, the equal mean of class probabilities. All
 copies train on the complete training portion of each fold; final copies train
 on all labeled rows. This is an ensemble of one model family, with shared
 parameters, rather than a mixture of different model classes.
+KNN requires `ensemble.n_models: 1` because it has no seed-based variation.
 
 <details>
 <summary>CatBoost and XGBoost configuration examples</summary>

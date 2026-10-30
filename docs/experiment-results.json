@@ -7,9 +7,9 @@
     "fold_sd_ddof": 0
   },
   "provenance": {
-    "local_results": "Copied from nine completed full local runs. Scores were checked against saved OOF CSVs; training was not rerun during this documentation update.",
+    "local_results": "Copied from ten completed full local runs. Scores were checked against saved OOF CSVs; training was not rerun during these documentation updates.",
     "kaggle_results": "Transcribed from the user-provided output of kaggle competitions submissions -c titanic, supplied on 2026-10-30. Not independently fetched during this update.",
-    "association": "Local runs are associated by experiment description and the unique matching saved run. The description gb_v1_optuna 29oct is associated with gb_v1_optuna. Uploaded CSV bytes were not supplied or verified.",
+    "association": "Earlier runs are associated by experiment description and the unique matching saved run. The description gb_v1_optuna 29oct is associated with gb_v1_optuna. For knn_1_tuned the author also supplied the successful submit command with the exact local file path and returned reference 57799934. Remote uploaded CSV bytes were not independently verified.",
     "submission_timestamps": "Preserved exactly as supplied; no timezone is inferred.",
     "artifact_availability": "artifacts/ is ignored by Git. This snapshot preserves selected configurations, reports, hashes and scores; models, full OOF CSVs and trial tables remain local."
   },
@@ -26,9 +26,21 @@
     "dataframe_sha256": "8331e5a2532f5fdb66153a8fc053df08a7dc9d2584f246c7fb1752f0a7139ca5",
     "test_dataframe_sha256": "7aef8fe23a77833e2f72f9b55a027b133d508d3f8e3bb5929944e384f619cfb2",
     "split_indices_sha256": "888ec6b0a4102729af375a1f448a5aac06914d82141bc772f481630cd19553f8",
-    "comparison_check": "Exact equality of data hash, feature set, seed, development/holdout indices and outer split identities across all nine runs."
+    "comparison_check": "Exact equality of data hash, feature set, seed, development/holdout indices and outer split identities across all ten runs."
   },
   "kaggle_submissions": [
+    {
+      "ref": 57799934,
+      "file_name": "submission.csv",
+      "date_as_reported": "2026-10-30 08:52:04.537000",
+      "description": "knn_1_tuned",
+      "status": "COMPLETE",
+      "public_accuracy": 0.75837,
+      "private_accuracy": null,
+      "matched_local_experiment": "knn_1_tuned",
+      "local_path_in_author_submit_command": "artifacts/knn_1_tuned/20261030T085106_102763Z/submission.csv",
+      "association_basis": "Author supplied the successful submit command with this local path and the returned submission reference."
+    },
     {
       "ref": 57798445,
       "file_name": "submission.csv",
@@ -258,7 +270,8 @@
         "training.json",
         "submission.csv",
         "inference.json"
-      ]
+      ],
+      "display_name": "Logistic regression (baseline)"
     },
     {
       "experiment": "lr_v1_tuned",
@@ -391,7 +404,8 @@
         "training.json",
         "submission.csv",
         "inference.json"
-      ]
+      ],
+      "display_name": "Logistic regression + Optuna"
     },
     {
       "experiment": "gb_v1",
@@ -554,7 +568,8 @@
         "training.json",
         "submission.csv",
         "inference.json"
-      ]
+      ],
+      "display_name": "Gradient boosting (baseline)"
     },
     {
       "experiment": "gb_v1_optuna",
@@ -719,7 +734,8 @@
         "training.json",
         "submission.csv",
         "inference.json"
-      ]
+      ],
+      "display_name": "Gradient boosting + Optuna"
     },
     {
       "experiment": "xgb_1_tuned",
@@ -920,7 +936,8 @@
         "training.json",
         "submission.csv",
         "inference.json"
-      ]
+      ],
+      "display_name": "XGBoost + Optuna"
     },
     {
       "experiment": "xgb_5seeds_tuned",
@@ -1128,7 +1145,8 @@
         "training.json",
         "submission.csv",
         "inference.json"
-      ]
+      ],
+      "display_name": "XGBoost ensemble (5 models)"
     },
     {
       "experiment": "lgbm_1_tuned",
@@ -1338,7 +1356,175 @@
         "training.json",
         "submission.csv",
         "inference.json"
-      ]
+      ],
+      "display_name": "LightGBM + Optuna"
+    },
+    {
+      "experiment": "knn_1_tuned",
+      "run_id": "20261030T085106_102763Z",
+      "local_artifact_directory": "artifacts/knn_1_tuned/20261030T085106_102763Z",
+      "status": "complete",
+      "run_kind": "full",
+      "model": "KNeighborsClassifier",
+      "ensemble": {
+        "n_models": 1,
+        "method": "single"
+      },
+      "configuration": {
+        "base": {
+          "exp_name": "knn_1_tuned",
+          "seed": 1027309,
+          "run_kind": "full"
+        },
+        "run": {
+          "mode": "full",
+          "model_path": null
+        },
+        "data": {
+          "train_path": "data/titanic/train.csv",
+          "test_path": "data/titanic/test.csv"
+        },
+        "features": {
+          "feature_set": "base_title_family"
+        },
+        "preprocessing": {
+          "encoding": "onehot",
+          "scale": true
+        },
+        "model": {
+          "name": "KNeighborsClassifier",
+          "params": {
+            "n_neighbors": 15,
+            "weights": "distance",
+            "metric": "minkowski",
+            "p": 2,
+            "n_jobs": 1
+          }
+        },
+        "ensemble": {
+          "n_models": 1,
+          "method": "soft",
+          "stacking_folds": 3,
+          "meta_model": {
+            "name": "LogisticRegression",
+            "params": {
+              "C": 1.0,
+              "max_iter": 2000
+            }
+          }
+        },
+        "validation": {
+          "development_size": 0.8,
+          "n_splits": 5,
+          "inner_splits": 3
+        },
+        "tuning": {
+          "enabled": true,
+          "n_trials": 60,
+          "search_space": {
+            "n_neighbors": {
+              "type": "int",
+              "low": 3,
+              "high": 31,
+              "step": 2
+            },
+            "weights": {
+              "type": "categorical",
+              "choices": [
+                "uniform",
+                "distance"
+              ]
+            },
+            "p": {
+              "type": "categorical",
+              "choices": [
+                1,
+                2
+              ]
+            }
+          }
+        },
+        "metric": {
+          "name": "accuracy"
+        },
+        "output": {
+          "dir": "artifacts"
+        },
+        "comparison": {
+          "runs": []
+        }
+      },
+      "evaluation": {
+        "method": "nested_cv",
+        "outer_folds": 5,
+        "inner_folds": 3,
+        "trials_per_search": 60,
+        "completed_searches": 6,
+        "cv_accuracy_mean": 0.8131980695360979,
+        "cv_accuracy_sd": 0.031331915288147605,
+        "oof_accuracy": 0.8132022471910112,
+        "fold_accuracies": [
+          0.8391608391608392,
+          0.7902097902097902,
+          0.7746478873239436,
+          0.8028169014084507,
+          0.8591549295774648
+        ]
+      },
+      "final_training": {
+        "selection_score_role": "development_selection_cv",
+        "selection_cv_accuracy": 0.8258104929735607,
+        "fit_rows": 891,
+        "parameters": {
+          "metric": "minkowski",
+          "n_jobs": 1,
+          "n_neighbors": 23,
+          "p": 2,
+          "weights": "uniform"
+        },
+        "checkpoint_predictions_verified_in_saved_report": true
+      },
+      "submission": {
+        "rows": 418,
+        "local_csv_sha256": "0aa2d01bc6370b4d81ba1fd0d26c35075eb20275748cee65a7a886e7c9097efb",
+        "kaggle_ref": 57799934
+      },
+      "versions": {
+        "numpy": "2.5.4",
+        "polars": "2.0.0",
+        "scikit-learn": "1.9.1",
+        "torch": "2.14.1",
+        "optuna": "5.0.0",
+        "optuna-integration": "5.0.0",
+        "joblib": "1.6.0",
+        "matplotlib": "3.11.2",
+        "marimo": "0.25.2",
+        "omegaconf": "2.4.0",
+        "catboost": "1.2.10",
+        "xgboost": "3.4.1",
+        "lightgbm": "4.7.0"
+      },
+      "source_sha256": {
+        "run.py": "97d0c4b525e8933fffed5762df8b7da96da6fbacc208f92c21fc71fb9d9618cd",
+        "src/models.py": "156393276908319f0635e3c1e43ed170980a33d2b53a48a00538c3db8850930c",
+        "src/evaluation.py": "15e7e9c71a30af3db52ee75e96a19da4574b7ff2c21de45522d377402303ad9b",
+        "src/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "src/features.py": "9a33ecc26b3d84395c1b6bd0eb4b1efd0fe00bb233ac5fd20ad86bffb4768ba9",
+        "src/utils.py": "4fb072ce7922a106aa746b732458c62e1aad9f9f44d309af0ab5f3d06ed24ab7",
+        "src/training.py": "47e85f13481e4fac5c7154f93223d4799b2d7551d585f0ce576a905696bfed00",
+        "src/data.py": "d414b70496323e1539816033c3f4ff152a2560452c3be0c2409e0007baba91d4"
+      },
+      "evidence_files": [
+        "config.yaml",
+        "manifest.json",
+        "metrics.json",
+        "evaluation/results.json",
+        "evaluation/oof.csv",
+        "training.json",
+        "submission.csv",
+        "inference.json"
+      ],
+      "display_name": "K-nearest neighbors + Optuna"
     },
     {
       "experiment": "gb_optuna_50trials",
@@ -1503,7 +1689,8 @@
         "training.json",
         "submission.csv",
         "inference.json"
-      ]
+      ],
+      "display_name": "Gradient boosting + Optuna (50 trials)"
     },
     {
       "experiment": "gb_optuna_60trials",
@@ -1668,7 +1855,8 @@
         "training.json",
         "submission.csv",
         "inference.json"
-      ]
+      ],
+      "display_name": "Gradient boosting + Optuna (60 trials)"
     }
   ]
 }
