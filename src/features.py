@@ -8,6 +8,21 @@ from sklearn.preprocessing import OneHotEncoder, OrdinalEncoder, StandardScaler
 
 
 def make_features(df: pl.DataFrame, feature_set="base"):
+    """Select a feature variant and derive its row-wise Titanic features.
+
+    Args:
+        df: Passenger DataFrame containing the raw columns for the variant.
+        feature_set: Key in variants, selecting title/family, ticket or cabin
+            features in addition to the base columns.
+
+    Returns:
+        (X, numeric, categorical): A Polars feature DataFrame and the column
+        lists for each preprocessing branch. Pclass is categorical. X contains
+        numeric columns first and excludes PassengerId and Survived.
+
+    Cabin mean/count features use entries within one passenger's row.
+    The older all variant includes raw Ticket/Cabin instead of parsed blocks.
+    """
     variants = {
         "base": [],
         "base_title": ["Title"],
@@ -24,8 +39,8 @@ def make_features(df: pl.DataFrame, feature_set="base"):
         "all": ["Title", "FamilySize", "Ticket", "Cabin"],
     }
     extra = variants[feature_set]
-    numeric = ["Pclass", "Age", "SibSp", "Parch", "Fare"]
-    categorical = ["Sex", "Embarked"]
+    numeric = [ "Age", "SibSp", "Parch", "Fare"]
+    categorical = ["Pclass", "Sex", "Embarked"]
     if "Title" in extra:
         df = df.with_columns(
             pl.col("Name").str.extract(r",\s*([^.]+)\.", 1).alias("Title")
@@ -75,6 +90,21 @@ def make_features(df: pl.DataFrame, feature_set="base"):
 
 
 def make_preprocess(numeric_columns, categorical_columns, encoding="onehot", scale=True):
+    """Build an unfitted imputation, encoding and optional scaling transformer.
+
+    Args:
+        numeric_columns: Columns imputed with their training medians.
+        categorical_columns: Columns imputed with their training modes.
+        encoding: onehot ignores unknown categories; ordinal maps them to -1.
+        scale: Apply StandardScaler to the numeric branch when True.
+
+    Returns:
+        A ColumnTransformer producing numeric values before encoded categories.
+        Fit it on each training split to learn preprocessing statistics.
+
+    Raises:
+        ValueError: encoding is neither onehot nor ordinal.
+    """
     numeric_steps = [("imputer", SimpleImputer(strategy="median"))]
     if scale:
         numeric_steps.append(("scaler", StandardScaler()))

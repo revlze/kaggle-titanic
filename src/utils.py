@@ -1,3 +1,5 @@
+"""Construct configured models, preprocessing, optimizers and search spaces."""
+
 import os
 import random
 import copy
@@ -21,6 +23,12 @@ from lightgbm import LGBMClassifier
 from features import make_features, make_preprocess
 
 def set_seed(seed=42):
+    """Seed Python, NumPy and PyTorch and request deterministic torch operations.
+
+    Also configure available CUDA backends, set PYTHONHASHSEED for subsequent
+    Python processes and print the selected seed. Unsupported deterministic
+    operations produce warnings rather than errors.
+    """
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -35,17 +43,29 @@ def set_seed(seed=42):
     print(f'Setted seed to {seed}')
 
 def get_optimizer(config, model):
-    '''Get PyTorch optimizer'''
+    """Construct the configured optimizer over trainable model parameters.
+
+    Args:
+        config: Configuration with optimizer.name and optimizer.params.
+        model: PyTorch module whose requires_grad parameters are optimized.
+
+    Returns:
+        A new torch.optim optimizer bound to the model's trainable parameters.
+    """
     parameters = [p for p in model.parameters() if p.requires_grad]
     optimizer = getattr(torch.optim, config.optimizer.name)(parameters, **config.optimizer.params)
     return optimizer
 
 def get_loss(config):
-    '''Get PyTorch loss from config.loss.name and config.loss.params.'''
+    """Instantiate a torch.nn loss using config.loss.name and loss.params."""
     return getattr(nn, config.loss.name)(**config.loss.params)
 
 def get_scheduler(config, optimizer):
-    '''Get PyTorch scheduler; a null scheduler disables it.'''
+    """Construct a learning-rate scheduler for the supplied optimizer.
+
+    Read its name and constructor parameters from config.scheduler.
+    Return None when the scheduler section or its name is null.
+    """
     if config.scheduler is None or config.scheduler.name is None:
         return None
     return getattr(torch.optim.lr_scheduler, config.scheduler.name)(
@@ -53,7 +73,20 @@ def get_scheduler(config, optimizer):
     )
 
 def get_model(config, *, load_pretrained=True, **runtime_params):
-    '''Get a configured sklearn classifier, custom PyTorch model or torchvision model.'''
+    """Instantiate a classical classifier, custom DNN or torchvision model.
+
+    Args:
+        config: Configuration containing model.name, model.params and the
+            base seed when constructing a classical classifier.
+        load_pretrained: Allow configured torchvision weights when True;
+            force weights=None when False.
+        **runtime_params: Constructor parameters overriding model.params,
+            including input sizes inferred by the DNN training code.
+
+    Returns:
+        A newly constructed model. Names starting with custom/ resolve to
+        classes in models.py; other non-classifier names resolve in torchvision.
+    """
     params = OmegaConf.to_container(config.model.params, resolve=True)
     params.update(runtime_params)
     classifiers = {
@@ -86,7 +119,21 @@ def get_model(config, *, load_pretrained=True, **runtime_params):
     return model
 
 def get_pipeline(config, train_dataset):
-    '''Build the classical pipeline using the existing config-based model getter.'''
+    """Build an unfitted classical pipeline or ensemble from the configuration.
+
+    Args:
+        config: Feature, preprocessing, model and optional ensemble settings.
+        train_dataset: Raw passenger DataFrame used to determine feature columns.
+
+    Returns:
+        A sklearn Pipeline for one classifier, soft/hard voting or stacking.
+        Stacking members contain their own preprocessing so each OOF fit learns
+        its transforms from its training rows. Ensemble seeds use base.seed.
+
+    Raises:
+        ValueError: The model, ensemble size, voting method or stacking folds
+            are unsupported. KNN supports a single model only.
+    """
     if config.model.name not in {
         'GradientBoostingClassifier', 'LogisticRegression', 'CatBoostClassifier', 'XGBClassifier', 'LGBMClassifier',
         'KNeighborsClassifier',
@@ -133,7 +180,20 @@ def get_pipeline(config, train_dataset):
     ])
 
 def get_dnn_spec(config, train_dataset):
-    '''Build a custom DNN specification using the same YAML object getters.'''
+    """Build a validated custom-DNN specification for training and evaluation.
+
+    Args:
+        config: Custom model, preprocessing, loss, optimizer and tuning settings.
+        train_dataset: Raw passenger DataFrame used to determine feature columns.
+
+    Returns:
+        A dictionary containing the model name, fixed training configuration,
+        unfitted preprocessing, optional embedding columns and a trial sampler.
+
+    Raises:
+        ValueError: The custom model, binary output/loss, embedding layout,
+            ensemble size or tuning parameter definitions are unsupported.
+    """
     import models
     model_class = getattr(models, config.model.name.removeprefix('custom/'))
     if not isinstance(model_class, type) or not issubclass(model_class, nn.Module):
@@ -172,6 +232,11 @@ def get_dnn_spec(config, train_dataset):
         raise ValueError('Optuna requires a non-empty tuning.search_space')
 
     def suggest_params(trial):
+        """Return a copy of the base DNN settings with sampled YAML parameters.
+
+        trial supplies values for model.*, optimizer.* and scheduler.* keys;
+        the base configuration captured by get_dnn_spec remains unchanged.
+        """
         candidate = copy.deepcopy(configuration)
         for key, settings in space.items():
             section, parameter = key.split('.', 1)
@@ -187,7 +252,16 @@ def get_dnn_spec(config, train_dataset):
     }
 
 def get_model_report(model):
-    '''Return JSON-ready base parameters and the actual fitted ensemble seeds.'''
+    """Describe a fitted classifier's parameters and ensemble composition.
+
+    Args:
+        model: Fitted classifier or fitted bagging, voting or stacking ensemble.
+
+    Returns:
+        A dictionary with parameters and ensemble metadata. Ensemble parameters
+        come from the first member; individual random seeds are listed separately.
+        Stacking metadata also includes the fitted meta-model and OOF fold count.
+    """
     if isinstance(model, (BaggingClassifier, VotingClassifier, StackingClassifier)):
         members = [member.named_steps['model'] if isinstance(member, Pipeline) else member
                    for member in model.estimators_]
@@ -208,7 +282,17 @@ def get_model_report(model):
     return {'parameters': model.get_params(), 'ensemble': {'n_models': 1}}
 
 def predict_classifier(model, X):
-    '''Return labels and optional survival probabilities; hard voting has no probabilities.'''
+    """Predict class labels and optional probabilities for the positive class.
+
+    Args:
+        model: Fitted classifier or pipeline exposing predict and classes_.
+        X: Feature matrix accepted by the fitted model.
+
+    Returns:
+        (predictions, probabilities): One-dimensional arrays in X row order.
+        probabilities is None when predict_proba is unavailable, as with hard
+        voting; otherwise it contains probabilities for class 1.
+    """
     predictions = model.predict(X)
     probabilities = None
     if hasattr(model, 'predict_proba'):
@@ -216,7 +300,20 @@ def predict_classifier(model, X):
     return predictions, probabilities
 
 def get_search_space(config, estimator):
-    '''Translate YAML ranges to the Optuna distributions used in the notebooks.'''
+    """Translate YAML tuning ranges into validated Optuna distributions.
+
+    Args:
+        config: Configuration containing tuning.search_space and model.name.
+        estimator: Unfitted pipeline defining valid model parameter names.
+
+    Returns:
+        A dictionary keyed by sklearn parameter paths. Voting/stacking paths
+        target the first member; tune_classical shares each setting across members.
+
+    Raises:
+        ValueError: The space is empty, a parameter/type is unknown, or an
+            ensemble search attempts to override its assigned member seeds.
+    """
     distributions = {
         'int': optuna.distributions.IntDistribution,
         'float': optuna.distributions.FloatDistribution,

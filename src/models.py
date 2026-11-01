@@ -9,7 +9,17 @@ from utils import get_pipeline as make_classical_pipeline, get_search_space as m
 
 
 class SmallMLP(nn.Module):
+    """Small ReLU MLP with dropout for the controlled model comparison."""
+
     def __init__(self, inp, out=1, hidden_sizes=(32,), dropout=0.1):
+        """Initialize the dense network.
+
+        Args:
+            inp: Number of preprocessed input features.
+            out: Number of output logits; binary classification uses one.
+            hidden_sizes: Non-empty sequence of hidden layer widths.
+            dropout: Drop probability after each hidden activation.
+        """
         super().__init__()
         layers = []
         for before, after in zip([inp, *hidden_sizes], hidden_sizes):
@@ -18,11 +28,16 @@ class SmallMLP(nn.Module):
         self.model = nn.Sequential(*layers)
 
     def forward(self, x):
+        """Map a (batch, inp) feature tensor to (batch, out) raw logits."""
         return self.model(x)
 
 
 def comparison_search_spaces():
-    """Keep the existing RF/GB ranges; add a modest logistic-regression search."""
+    """Return Optuna spaces for logistic regression, random forest and GB.
+
+    The dictionary is keyed by classifier name. Each value maps sklearn
+    pipeline parameter names, prefixed with model__, to Optuna distributions.
+    """
     return {
         "LogisticRegression": {
             "model__C": optuna.distributions.FloatDistribution(1e-3, 100, log=True),
@@ -45,6 +60,15 @@ def comparison_search_spaces():
 
 
 def suggest_small_mlp(trial):
+    """Sample the small MLP architecture, dropout and AdamW settings.
+
+    Args:
+        trial: Optuna trial used to suggest parameter values.
+
+    Returns:
+        A configuration dictionary with model_params, optimizer settings and
+        a ReduceLROnPlateau scheduler specification, ready for fit_dnn.
+    """
     architecture = trial.suggest_categorical("architecture", ["32", "64_32"])
     return {
         "model_params": {
@@ -63,7 +87,16 @@ def suggest_small_mlp(trial):
 
 
 def suggest_notebook_dnn(trial, embedding=False):
-    """Preserve the original notebook search, separate from the small MLP."""
+    """Sample the original notebook DNN and optimizer configuration.
+
+    Args:
+        trial: Optuna trial used for architecture and optimizer suggestions.
+        embedding: Also sample embedding widths for the five categorical slots.
+
+    Returns:
+        Model, optimizer and scheduler settings in the fit_dnn format.
+        This search preserves the larger notebook architecture.
+    """
     params = {
         "out": 1,
         "hidden_sizes": [
@@ -94,7 +127,17 @@ def suggest_notebook_dnn(trial, embedding=False):
 
 
 class MyModel(nn.Module):
+    """Notebook MLP with BatchNorm, LeakyReLU and dropout hidden blocks."""
+
     def __init__(self, inp, out, hidden_sizes=[500, 200, 50], dropout=0.0):
+        """Initialize the MLP for an already encoded feature matrix.
+
+        Args:
+            inp: Number of preprocessed input features.
+            out: Number of output logits; binary classification uses one.
+            hidden_sizes: Widths of the hidden layers.
+            dropout: Drop probability within each hidden block.
+        """
         super().__init__()
         self.inp = inp
         self.out = out
@@ -103,6 +146,7 @@ class MyModel(nn.Module):
         self._build_model()
 
     def _build_model(self):
+        """Store the hidden blocks and final linear output layer in self.model."""
         layers = []
         for hs1, hs2 in zip(self.hidden_sizes, self.hidden_sizes[1:]):
             layers.extend(
@@ -117,11 +161,34 @@ class MyModel(nn.Module):
         self.model = nn.Sequential(*layers) 
 
     def forward(self, x):
+        """Map a (batch, inp) feature tensor to (batch, out) raw logits."""
         return self.model(x)
 
 
 class MyModelEmb(nn.Module):
+    """Notebook MLP combining numeric features with five category embeddings.
+
+    Categorical inputs must follow the fixed order Sex, Embarked, Cabin,
+    Ticket, Title and contain ordinal codes from the fitted encoder.
+    """
+
     def __init__(self, inp, out, num_slice, cat_slice, hidden_sizes=[500, 200, 50], dropout=0.0, sex_emb_dim=2, embarked_emb_dim=2, cabin_emb_dim=2, ticket_emb_dim=2, title_emb_dim=2, cat_sizes=None):
+        """Initialize the dense network and category embedding tables.
+
+        Args:
+            inp: Numeric feature count plus the sum of embedding widths.
+            out: Number of output logits; binary classification uses one.
+            num_slice: Slice selecting numeric columns in the encoded input.
+            cat_slice: Slice selecting the five ordered categorical columns.
+            hidden_sizes: Widths of the dense hidden layers.
+            dropout: Drop probability within each hidden block.
+            sex_emb_dim: Width of the Sex embedding.
+            embarked_emb_dim: Width of the Embarked embedding.
+            cabin_emb_dim: Width of the Cabin embedding.
+            ticket_emb_dim: Width of the Ticket embedding.
+            title_emb_dim: Width of the Title embedding.
+            cat_sizes: Five vocabulary sizes, each including an unknown slot.
+        """
         super().__init__()
         if cat_sizes is None:
             raise ValueError("Передай размеры словарей из train encoder через cat_sizes")
@@ -139,6 +206,7 @@ class MyModelEmb(nn.Module):
         self.cat_slice = cat_slice
 
     def _build_model(self):
+        """Build self.model for concatenated numeric features and embeddings."""
         layers = []
         for hs1, hs2 in zip(self.hidden_sizes, self.hidden_sizes[1:]):
             layers.extend(
@@ -153,6 +221,12 @@ class MyModelEmb(nn.Module):
         self.model = nn.Sequential(*layers) 
 
     def forward(self, x):
+        """Embed ordinal categories, concatenate numeric values and return logits.
+
+        x contains numeric and ordinal columns in the fitted transformer's
+        output order. Adding one maps the encoder's unknown code -1 to slot 0.
+        The returned tensor has shape (batch, out).
+        """
         x_num = x[:, self.num_slice]
         x_cat = x[:, self.cat_slice].to(torch.int32) + 1
         sex_vector = self.sex_emb(x_cat[:, 0])

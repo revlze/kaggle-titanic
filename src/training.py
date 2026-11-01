@@ -25,7 +25,24 @@ from features import make_features
 
 
 def tune_classical(estimator, distributions, X, y, cv, *, seed, n_trials):
-    """Search only the rows supplied by the caller; clone preprocessing for every fit."""
+    """Tune a classical pipeline by mean CV accuracy on the supplied rows.
+
+    Args:
+        estimator: Unfitted pipeline, optionally containing a voting/stacking model.
+        distributions: Optuna distributions keyed by sklearn parameter paths.
+        X: Features used for parameter selection.
+        y: Target labels aligned with X.
+        cv: Fit/validation index pairs relative to X and y.
+        seed: Seed for the Optuna TPE sampler.
+        n_trials: Positive number of parameter configurations to evaluate.
+
+    Returns:
+        A search result exposing best_estimator_, best_params_, best_score_
+        and study_. The best estimator is refitted on all supplied rows.
+
+    Every CV fit clones preprocessing. Ensemble members share sampled settings
+    while retaining their assigned seeds. best_score_ is a selection score.
+    """
     if n_trials < 1:
         raise ValueError("tuning.n_trials must be positive")
     study = optuna.create_study(
@@ -38,10 +55,12 @@ def tune_classical(estimator, distributions, X, y, cv, *, seed, n_trials):
         first_name = model.estimators[0][0]
 
         def shared_params(params):
+            """Expand first-member parameter paths to every ensemble member."""
             return {key.replace(f"model__{first_name}__", f"model__{name}__", 1): value
                     for key, value in params.items() for name, _ in model.estimators}
 
         def objective(trial):
+            """Sample shared member settings and return their mean CV accuracy."""
             params = {}
             for name, distribution in distributions.items():
                 if isinstance(distribution, optuna.distributions.CategoricalDistribution):
@@ -71,7 +90,22 @@ def tune_classical(estimator, distributions, X, y, cv, *, seed, n_trials):
 
 
 def fit_classical(train_dataset, estimator, config, run_dir, distributions=None):
-    """Select on development if requested, then refit a fresh pipeline on ALL labels."""
+    """Select parameters on development, then refit on all labeled rows.
+
+    Args:
+        train_dataset: Raw labeled passenger DataFrame.
+        estimator: Unfitted classical pipeline or ensemble.
+        config: Feature, validation and tuning settings.
+        run_dir: Existing directory for the model and training reports.
+        distributions: Optuna parameter distributions when tuning is enabled.
+
+    Returns:
+        Path to model.joblib, containing the fitted pipeline, feature columns
+        and training configuration. Also write training reports and split metadata.
+
+    With tuning disabled, use the configured parameters directly. The final
+    refit includes the previously excluded holdout rows after selection is complete.
+    """
     run_dir = Path(run_dir)
     X, _, _ = make_features(train_dataset, config.features.feature_set)
     y = train_dataset["Survived"].to_numpy()
@@ -130,7 +164,17 @@ def fit_classical(train_dataset, estimator, config, run_dir, distributions=None)
 
 
 def predict_classical(model_path, test_dataset, run_dir):
-    """Use the saved feature specification and fitted transforms, without fitting."""
+    """Load a saved classical pipeline and write predictions in test row order.
+
+    Args:
+        model_path: Path to a model.joblib artifact from fit_classical.
+        test_dataset: Raw passenger DataFrame for inference.
+        run_dir: Existing directory for submission, predictions and provenance.
+
+    Returns:
+        A Polars DataFrame with PassengerId and predicted Survived labels.
+        Feature extraction follows the artifact; fitted preprocessing is reused.
+    """
     artifact = joblib.load(model_path)
     X, _, _ = make_features(test_dataset, artifact["feature_set"])
     if X.columns != artifact["feature_columns"]:
@@ -142,7 +186,23 @@ def predict_classical(model_path, test_dataset, run_dir):
 
 
 def save_predictions(artifact, predictions, probabilities, test_dataset, run_dir, model_path, ensemble):
-    """Write the same ordered submission and provenance for sklearn and PyTorch."""
+    """Validate and save ordered predictions for classical and PyTorch models.
+
+    Args:
+        artifact: Saved feature specification, model name and training configuration.
+        predictions: One binary label per test row, with shape (n_rows,).
+        probabilities: Class-1 probabilities with the same shape, or None.
+        test_dataset: Passenger DataFrame supplying IDs and row order.
+        run_dir: Existing directory for submission.csv, predictions.csv and inference.json.
+        model_path: Model artifact path recorded in inference provenance.
+        ensemble: Member count and optional voting/stacking metadata.
+
+    Returns:
+        A Polars DataFrame with PassengerId and integer Survived predictions.
+
+    Raises:
+        ValueError: Label/probability shapes or values are invalid.
+    """
     if (predictions.shape != (len(test_dataset),) or not np.isin(predictions, [0, 1]).all()
             or (probabilities is not None and (
                 probabilities.shape != (len(test_dataset),) or not np.isfinite(probabilities).all()
@@ -167,11 +227,30 @@ def save_predictions(artifact, predictions, probabilities, test_dataset, run_dir
 
 
 def tune_dnn(spec, X, y, cv, *, seed, n_trials, epochs, device="cpu", batch_size=64, stopping_size=0.2):
-    """Inner validation scores never select epochs or fit preprocessing."""
+    """Tune a DNN using CV accuracy with separate internal stopping subsets.
+
+    Args:
+        spec: Model class/name, preprocessing and suggest_params trial sampler.
+        X: Features available to this parameter search.
+        y: Target labels aligned with X.
+        cv: Inner fit/validation index pairs relative to X and y.
+        seed: Seed for the sampler and internal stopping splits.
+        n_trials: Number of configurations to evaluate.
+        epochs: Training epoch budget for each fold.
+        device: PyTorch execution device.
+        batch_size: Requested training batch size.
+        stopping_size: Fraction of each inner training fold reserved for stopping.
+
+    Returns:
+        An Optuna study whose trials record configuration, inner fold scores
+        and selected epochs. Inner validation labels only score predictions;
+        preprocessing and epoch selection use each inner fold's fit/stop rows.
+    """
     study = optuna.create_study(direction='maximize', sampler=optuna.samplers.TPESampler(seed=seed),
                                 pruner=optuna.pruners.NopPruner())
 
     def objective(trial):
+        """Return mean inner-CV accuracy for one sampled DNN configuration."""
         configuration = spec['suggest_params'](trial)
         trial.set_user_attr('configuration', configuration)
         scores, best_epochs = [], []
@@ -192,7 +271,21 @@ def tune_dnn(spec, X, y, cv, *, seed, n_trials, epochs, device="cpu", batch_size
 
 
 def fit_custom_dnn(train_dataset, spec, config, run_dir):
-    """Select settings/epochs on development, then refit all labels without validation."""
+    """Select DNN settings and epochs on development, then refit all labels.
+
+    Args:
+        train_dataset: Raw labeled passenger DataFrame.
+        spec: Custom-DNN specification from utils.get_dnn_spec.
+        config: Feature, validation, tuning and training settings.
+        run_dir: Existing directory for model.pt, preprocessing and training reports.
+
+    Returns:
+        Path to model.pt. The companion preprocess.joblib stores the fitted
+        transformer required for inference.
+
+    An internal development split selects the epoch count and learning-rate
+    schedule. A fresh full-data fit replays both with no validation loader.
+    """
     run_dir = Path(run_dir)
     X, _, _ = make_features(train_dataset, config.features.feature_set)
     y = train_dataset['Survived'].to_numpy()
@@ -258,6 +351,17 @@ def fit_custom_dnn(train_dataset, spec, config, run_dir):
 
 
 def predict_custom_dnn(model_path, test_dataset, run_dir, device='cpu'):
+    """Restore a custom DNN and its preprocessing and write test predictions.
+
+    Args:
+        model_path: Path to model.pt with its companion preprocessing artifact.
+        test_dataset: Raw passenger DataFrame whose feature columns must match training.
+        run_dir: Existing directory for submission, probabilities and provenance.
+        device: PyTorch device used for inference.
+
+    Returns:
+        A Polars DataFrame with PassengerId and predicted Survived labels.
+    """
     artifact = torch.load(model_path, map_location='cpu', weights_only=True)
     X, _, _ = make_features(test_dataset, artifact['feature_set'])
     if X.columns != artifact['feature_columns']:
@@ -270,6 +374,18 @@ def predict_custom_dnn(model_path, test_dataset, run_dir, device='cpu'):
 
 
 def predict_loader(model, loss_model, loader, device="cpu"):
+    """Evaluate a labeled binary-classification loader without gradients.
+
+    Args:
+        model: DNN returning one raw logit per row.
+        loss_model: Scalar loss applied to logits and binary targets.
+        loader: Batches of feature tensors and column-shaped target tensors.
+        device: Device already holding the model.
+
+    Returns:
+        (loss, accuracy): Sample-weighted batch loss and classification accuracy,
+        using sigmoid probabilities thresholded at 0.5.
+    """
     model.eval()
     loss_sum, probabilities, targets = 0.0, [], []
     with torch.no_grad():
@@ -285,7 +401,28 @@ def predict_loader(model, loss_model, loader, device="cpu"):
 
 def train_epochs(model, loss_model, opt, train_loader, val_loader, sched=None,
                  epoches=15, trial=None, device="cpu", learning_rates=None):
-    """val_loader is INTERNAL validation, never an outer evaluation fold."""
+    """Train a binary DNN and optionally restore its best internal-validation weights.
+
+    Args:
+        model: PyTorch module returning one logit per row.
+        loss_model: Loss function accepting logits and binary targets.
+        opt: Optimizer bound to the model's parameters.
+        train_loader: Batches used for gradient updates.
+        val_loader: Internal stopping loader, or None for a final fixed-epoch refit.
+        sched: Optional scheduler stepped after internal validation.
+        epoches: Number of training epochs, preserving the existing argument name.
+        trial: Optional Optuna trial for epoch reporting and pruning.
+        device: PyTorch execution device.
+        learning_rates: Optional per-epoch, per-optimizer-group rates to replay.
+
+    Returns:
+        A dictionary with the trained model, optimizer, loss, metric histories,
+        selected/last epoch numbers and used learning rates. With validation,
+        restore the earliest weights achieving the highest validation accuracy.
+        Without validation, retain the final weights and leave accuracy unset.
+
+    val_loader must contain internal stopping rows, not an outer evaluation fold.
+    """
     model.to(device)
     history = {name: [] for name in ["train_loss", "train_acc", "val_loss", "val_acc"]}
     best_accuracy, best_state, best_epoch = -1.0, None, None
@@ -305,6 +442,7 @@ def train_epochs(model, loss_model, opt, train_loader, val_loader, sched=None,
             loss.backward()
             if isinstance(opt, torch.optim.LBFGS):
                 def closure():
+                    """Recompute the current batch loss and gradients for LBFGS."""
                     opt.zero_grad()
                     closure_loss = loss_model(model(x), target)
                     closure_loss.backward()
@@ -356,6 +494,20 @@ def train_epochs(model, loss_model, opt, train_loader, val_loader, sched=None,
 
 
 def build_dnn(model_cls, model_params, preprocessing, input_dim, embedding_columns=None):
+    """Infer input sizes from fitted preprocessing and instantiate a fresh DNN.
+
+    Args:
+        model_cls: PyTorch module class or configured model name.
+        model_params: Architecture settings; inp is inferred here.
+        preprocessing: Fitted ColumnTransformer with output slices and categories.
+        input_dim: Width of its transformed feature matrix.
+        embedding_columns: Ordered category names used for embedding width settings.
+
+    Returns:
+        (model, params, embedding_metadata): The new model, resolved constructor
+        parameters and optional numeric/category slices and vocabulary sizes.
+        Embedding vocabularies reserve one extra slot for unknown categories.
+    """
     params = model_params.copy()
     params["inp"] = input_dim
     embedding_metadata = None
@@ -375,6 +527,16 @@ def build_dnn(model_cls, model_params, preprocessing, input_dim, embedding_colum
 
 
 def restore_dnn(model_cls, model_params, embedding_metadata=None):
+    """Instantiate a DNN architecture from constructor and embedding metadata.
+
+    Args:
+        model_cls: PyTorch module class or configured model name.
+        model_params: Saved constructor parameters, including inferred input size.
+        embedding_metadata: Optional serialized slices and category vocabulary sizes.
+
+    Returns:
+        A newly initialized module. The caller loads checkpoint weights into it.
+    """
     params = model_params.copy()
     if embedding_metadata:
         params.update({
@@ -389,7 +551,28 @@ def restore_dnn(model_cls, model_params, embedding_metadata=None):
 
 def fit_dnn(model_cls, configuration, preprocessing, X_fit, y_fit, X_stop, y_stop,
             seed, epochs=15, embedding_columns=None, device="cpu", batch_size=64, learning_rates=None):
-    """Only fit/stop data enter training; the caller keeps outer validation aside."""
+    """Fit preprocessing and a fresh DNN using fit and optional internal stopping rows.
+
+    Args:
+        model_cls: PyTorch module class or configured model name.
+        configuration: Model, loss, optimizer and scheduler settings.
+        preprocessing: Unfitted transformer cloned and fitted only on X_fit.
+        X_fit: Features used to learn preprocessing and model weights.
+        y_fit: Binary labels aligned with X_fit.
+        X_stop: Internal stopping features, or None for a fixed-epoch refit.
+        y_stop: Binary labels for X_stop, or None when stopping is disabled.
+        seed: Seed for initialization, shuffled batches and supported operations.
+        epochs: Positive training epoch budget.
+        embedding_columns: Optional ordered names of embedded categorical features.
+        device: PyTorch execution device.
+        batch_size: Requested batch size, adjusted to avoid a singleton tail.
+        learning_rates: Optional per-epoch learning-rate schedule for final refitting.
+
+    Returns:
+        The train_epochs result extended with fitted preprocessing, resolved model
+        parameters, embedding metadata and configuration. Outer validation stays
+        with the caller and is never passed to this training function.
+    """
     utils.set_seed(seed)
     fitted_preprocess = clone(preprocessing)
     x_fit = torch.as_tensor(fitted_preprocess.fit_transform(X_fit), dtype=torch.float32)
@@ -429,7 +612,19 @@ def fit_dnn(model_cls, configuration, preprocessing, X_fit, y_fit, X_stop, y_sto
 
 
 def predict_dnn(model, preprocessing, X, device="cpu"):
-    """Prediction has no labels, optimizer, scheduler or checkpoint selection."""
+    """Predict binary labels and survival probabilities with fitted DNN artifacts.
+
+    Args:
+        model: Trained PyTorch module producing one logit per row.
+        preprocessing: Fitted transformer applied to X without refitting.
+        X: Feature DataFrame in the model's expected column layout.
+        device: PyTorch device used for batches of up to 64 rows.
+
+    Returns:
+        (predictions, probabilities): Arrays of shape (len(X),) in input row order.
+        Probabilities are sigmoid outputs; values at least 0.5 receive label 1.
+        Inference runs in evaluation mode with gradients disabled.
+    """
     model.to(device)
     model.eval()
     values = torch.as_tensor(preprocessing.transform(X), dtype=torch.float32)

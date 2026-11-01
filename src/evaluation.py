@@ -27,7 +27,17 @@ from utils import get_model_report, predict_classifier
 
 
 def write_run_summary(run_dir):
-    """Collect saved scores into one readable report; never fit or select a model."""
+    """Collect saved run artifacts into metrics.json and a readable summary.md.
+
+    Args:
+        run_dir: Run directory containing manifest.json, config.yaml and any
+            completed evaluation, training or inference reports.
+
+    Returns:
+        The metrics dictionary written to disk. Missing or unfinished stages
+        leave their scores unset. CV estimates and final selection scores are
+        recorded separately; this function performs no model fitting or selection.
+    """
     run_dir = Path(run_dir)
     manifest = json.loads((run_dir / "manifest.json").read_text())
     config = OmegaConf.load(run_dir / "config.yaml")
@@ -155,6 +165,22 @@ def write_run_summary(run_dir):
 
 
 def make_cv_plan(y, seed, development_size=0.8, n_splits=5):
+    """Create a stratified development/holdout split and outer CV folds.
+
+    Args:
+        y: Target labels in the original dataset order.
+        seed: Random seed for the holdout split and shuffled CV folds.
+        development_size: Fraction of rows used for development and CV.
+        n_splits: Number of CV folds within the development subset.
+
+    Returns:
+        (train_i, holdout_i, outer): Development and holdout indices into the
+        original dataset, plus a list of (fit, val) index pairs relative to
+        the development subset. Use train_i[fit] or train_i[val] to recover
+        the original row indices for a fold.
+
+    Holdout rows never enter CV; each development row is validated once.
+    """
     train_i, holdout_i = split_development(y, seed, development_size)
     development_y = np.asarray(y)[train_i]
     outer = list(StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed).split(train_i, development_y))
@@ -167,7 +193,20 @@ def make_cv_plan(y, seed, development_size=0.8, n_splits=5):
 
 
 def validate_oof(oof, train_dataset, train_i, holdout_i, outer_splits, model_names):
-    """Validate coverage, source-row identity, labels, folds and probabilities."""
+    """Assert OOF coverage, row identities, labels and valid prediction values.
+
+    Args:
+        oof: Polars DataFrame of per-model development predictions and fold IDs.
+        train_dataset: Original labeled DataFrame used to check IDs and targets.
+        train_i: Development indices into train_dataset.
+        holdout_i: Excluded indices into train_dataset.
+        outer_splits: Fit/validation pairs indexed within the development subset.
+        model_names: Expected model identifiers in the OOF table.
+
+    Each model must predict every development row exactly once in its assigned
+    validation fold. Probabilities must be entirely absent or finite in [0, 1].
+    Return None; a failed consistency check raises AssertionError.
+    """
     assert set(oof["model"].to_list()) == set(model_names)
     for name in model_names:
         rows = oof.filter(pl.col("model") == name)
@@ -192,6 +231,19 @@ def validate_oof(oof, train_dataset, train_i, holdout_i, outer_splits, model_nam
 
 
 def plot_comparison(summary, oof, run_kind="full", feature_set="base_title_family", inner_folds=3):
+    """Plot mean outer accuracy, fold SD and individual OOF fold accuracies.
+
+    Args:
+        summary: Per-model records with model name and outer accuracy mean/SD.
+        oof: Polars table containing model, outer_fold, y_true and y_pred.
+        run_kind: Run label displayed in the figure title.
+        feature_set: Feature variant displayed in the title.
+        inner_folds: Inner search fold count; zero labels ordinary fixed CV.
+
+    Returns:
+        A matplotlib Figure with accuracies on the 0-1 scale. The caller saves
+        and closes it. Error bars show fold SD, not confidence intervals.
+    """
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(figsize=(9, 4))
@@ -230,6 +282,30 @@ def run_cv_experiment(train_dataset, model_specs, results_path, *, feature_set,
     With tune=False, models run ordinary CV without inner search folds.
     DNNs keep an internal stopping split separate from evaluation folds.
     Existing notebook calls retain the nested-CV defaults.
+
+    Args:
+        train_dataset: Raw labeled passenger DataFrame.
+        model_specs: Mapping from model names to classical or DNN specifications.
+        results_path: Parent directory for a generated evaluation run directory.
+        feature_set: Feature variant passed to make_features.
+        seed: Seed for stratified splits and model/search initialization.
+        n_trials: Optuna trials per model and outer fold when tune is True.
+        epochs: Maximum DNN training epochs for each fit.
+        run_kind: full/smoke label; actual budgets are supplied by the caller.
+        device: PyTorch device used for DNN fits and predictions.
+        tune: Run nested CV with inner parameter search when True; otherwise
+            evaluate the fixed model configurations with ordinary outer CV.
+        development_size: Fraction of labeled rows available to evaluation fits.
+        n_splits: Number of stratified outer evaluation folds.
+        inner_splits: Number of inner folds used for parameter selection.
+        output_dir: Exact new evaluation directory, overriding results_path/run_id.
+        batch_size: Requested DNN batch size.
+        stopping_size: Fraction of DNN training rows reserved for internal stopping.
+
+    Returns:
+        A results dictionary containing the protocol, model summaries, fold records
+        and run directory. Also save OOF predictions, checkpoints, search tables
+        when tuning, JSON reports and an accuracy plot in the evaluation directory.
     """
     if (tune and n_trials < 1) or epochs < 1:
         raise ValueError("n_trials and epochs must be positive")
@@ -402,6 +478,16 @@ def run_cv_experiment(train_dataset, model_specs, results_path, *, feature_set,
 
 
 def controlled_model_specs(train_dataset, seed):
+    """Build unfitted model specifications for the controlled nested-CV comparison.
+
+    Args:
+        train_dataset: Raw DataFrame used to determine base_title_family columns.
+        seed: Random seed for the classical classifier constructors.
+
+    Returns:
+        Specifications for logistic regression, random forest, Gradient Boosting
+        and SmallMLP, including separate preprocessing and Optuna search settings.
+    """
     _, numeric, categorical = make_features(train_dataset, "base_title_family")
     preprocessing = make_preprocess(numeric, categorical)
     estimators = {
