@@ -1,13 +1,15 @@
-# Titanic experiments — 2026-10-30
+# Titanic experiments — 2026-11-01
 
-Ten local runs and eight Kaggle submissions. The main table and plot are in the
-[README](../README.md#recorded-results); full run details are in the
+25 completed local runs and 17 Kaggle submissions. The main table is in the
+[README](../README.md#recorded-results); earlier run details are in the
 [result snapshot](experiment-results.json).
 
 ## Notes
 
-I keep logistic regression as my baseline: **0.77272** public accuracy with and
-without Optuna. None of my other recorded submissions exceeded it.
+My new best is **0.77990**: five Gradient Boosting models with **hard voting**,
+Optuna (10 trials per search) and the new ticket/cabin features. CV: **83.00% ± 2.56 pp**.
+The same five-model hard vote without Optuna scored **0.76794** public / **83.43% ± 0.96 pp** CV.
+Logistic regression remains my baseline: **0.77272**, or **0.77751** with the new features.
 
 Single XGBoost: **83.56% ± 3.24 pp** CV, **0.75837** public.
 Five-seed soft ensemble: **82.87% ± 2.62 pp** CV, **0.75598** public.
@@ -25,10 +27,11 @@ Tuned KNN: **81.32% ± 3.13 pp** CV, **0.75837** public. Final settings:
 
 ## Validation
 
-Same `base_title_family` features, seed `0xFACED`, 712 development rows and
+Seed `0xFACED`, 712 development rows and
 179 excluded, previously viewed holdout rows. Fixed models use stratified
 5-fold CV; tuned models use 5 outer / 3 inner folds. Preprocessing is fitted
-inside each training fold.
+inside each training fold. Earlier runs use `base_title_family`; new runs add
+ticket/cabin features as listed in the README.
 
 Tuned runs also use a separate 3-fold final selection search, then refit on all
 891 labeled rows. The selection score is not an independent accuracy estimate.
@@ -39,8 +42,10 @@ across experiments. The old holdout is not a fresh final test.
 
 ## Source and matching boundary
 
+Public scores checked against [Kaggle submissions](https://www.kaggle.com/competitions/titanic/submissions)
+on 2026-11-01.
 
-Exact run/submission IDs, starting configs, final parameters, fold scores,
+Earlier run/submission IDs, starting configs, final parameters, fold scores,
 versions and local CSV hashes are in the [JSON snapshot](experiment-results.json).
 Earlier submissions are matched by description; the KNN submit command also
 records the exact local file. These records do not verify uploaded-file hashes.

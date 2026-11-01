@@ -7,12 +7,19 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, OrdinalEncoder, StandardScaler
 
 
-def make_features(df, feature_set="base"):
+def make_features(df: pl.DataFrame, feature_set="base"):
     variants = {
         "base": [],
         "base_title": ["Title"],
         "base_family": ["FamilySize"],
-        "base_title_family": ["Title", "FamilySize"],
+        'base_extticket': ['TicketString', 'TicketNum'],
+        'base_extcabin': ['CabinLet', 'CabinNum', 'CabinCount'],
+        "base_title_family": ["Title", "FamilySize",],
+        "base_title_family_extticket": ["Title", "FamilySize", 'TicketString', 'TicketNum'],
+        "base_title_family_extticket_extcabin": ["Title", "FamilySize",
+                                                  'TicketString', 'TicketNum',
+                                                  'CabinLet', 'CabinNum', 'CabinCount'
+                                                ],
         "base_ticket_cabin": ["Ticket", "Cabin"],
         "all": ["Title", "FamilySize", "Ticket", "Cabin"],
     }
@@ -27,8 +34,43 @@ def make_features(df, feature_set="base"):
         df = df.with_columns(
             (pl.col("SibSp") + pl.col("Parch") + 1).alias("FamilySize")
         )
-        numeric += ["FamilySize"]
-    categorical += [c for c in ["Cabin", "Ticket", "Title"] if c in extra]
+
+    if all(i in extra for i in ['TicketString', 'TicketNum']):
+        df = df.with_columns(
+            pl.col('Ticket')
+            .str.extract(r"^(.*?)\s+\d+$", 1)
+            .fill_null("NONE")
+            .alias("TicketString"),
+
+            pl.col("Ticket")
+            .str.extract(r"(\d+)$", 1)
+            .cast(pl.Int64, strict=False)
+            .alias("TicketNum"),
+        )
+
+    if all(i in extra for i in ['CabinLet', 'CabinNum', 'CabinCount']):
+        df = df.with_columns(
+            pl.col('Cabin')
+            .str.extract_all(r"[A-Z]+")
+            .list.unique(maintain_order=True)
+            .list.join("")
+            .alias("CabinLet"),
+
+            pl.col("Cabin")
+            .str.extract_all(r"\d+")
+            .list.eval(pl.element().cast(pl.Int64))
+            .list.mean()
+            .alias('CabinNum'),
+
+            pl.col("Cabin")
+            .str.count_matches(r"\b[A-Z]+\d+\b")
+            .alias("CabinCount"),
+        )
+
+
+    categorical += [c for c in ["Cabin", "Ticket", "Title", 'TicketString', 'CabinLet'] if c in extra]
+    numeric += [n for n in ['FamilySize', 'TicketNum', 'CabinNum', 'CabinCount'] if n in extra]
+
     return df.select(numeric + categorical), numeric, categorical
 
 

@@ -75,13 +75,8 @@ def _():
 
     return (
         CatBoostClassifier,
-        ColumnTransformer,
         LogisticRegression,
-        OneHotEncoder,
-        OrdinalEncoder,
         Pipeline,
-        SimpleImputer,
-        StandardScaler,
         StratifiedKFold,
         accuracy_score,
         clone,
@@ -125,6 +120,7 @@ def _(data_path, pl):
 @app.cell
 def _():
     from features import make_features, make_preprocess
+
     return make_features, make_preprocess
 
 
@@ -422,6 +418,31 @@ def _(mo):
     фолдам и решение: оставить, исключить или перепроверить. Нейтральные
     и неудачные результаты тоже сохраняются в журнале.
     """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Пытаюсь придумать еще пару новых фич
+    """)
+    return
+
+
+@app.cell
+def _(train_dataset):
+    train_dataset[['Cabin']].unique()
+    return
+
+
+@app.cell
+def _(train_dataset):
+    train_dataset[['Ticket']].unique()
+    return
+
+
+@app.cell
+def _():
     return
 
 

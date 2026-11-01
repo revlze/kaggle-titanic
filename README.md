@@ -2,8 +2,8 @@
 
 Titanic survival predictions.
 
-**Best recorded Kaggle public accuracy: [0.77272](docs/EXPERIMENTS.md#source-and-matching-boundary)**,
-achieved by both my fixed and tuned logistic-regression submissions.
+**Best recorded Kaggle public accuracy: [0.77990](docs/EXPERIMENTS.md#source-and-matching-boundary)**:
+five Gradient Boosting models with hard voting, Optuna and the new ticket/cabin features.
 
 ```mermaid
 flowchart LR
@@ -24,18 +24,25 @@ Local CV is **mean accuracy (%) ± fold SD (percentage points)**. Fixed models u
 
 | Model / setup | Optuna trials / search | Local CV, % ± SD | Public accuracy |
 |---|---:|---:|---:|
-| Logistic regression (baseline) | 0 | 82.72 ± 2.15 | **0.77272** |
-| Logistic regression + Optuna | 60 | 82.30 ± 2.44 | **0.77272** |
+| Logistic regression (baseline) | 0 | 82.72 ± 2.15 | 0.77272 |
+| Logistic regression + Optuna | 60 | 82.30 ± 2.44 | 0.77272 |
 | Gradient boosting (baseline) | 0 | 82.86 ± 1.71 | 0.76076 |
 | Gradient boosting + Optuna | 20 | 83.00 ± 2.10 | 0.75837 |
 | XGBoost + Optuna | 60 | 83.56 ± 3.24 | 0.75837 |
 | XGBoost ensemble (5 models) | 60 | 82.87 ± 2.62 | 0.75598 |
 | LightGBM + Optuna | 60 | 82.58 ± 2.81 | 0.76076 |
 | K-nearest neighbors + Optuna | 60 | 81.32 ± 3.13 | 0.75837 |
+| Logistic regression + ticket | 0 | 82.72 ± 2.89 | 0.77751 |
+| LightGBM + ticket | 0 | 83.71 ± 4.24 | 0.77033 |
+| Logistic regression + ticket/cabin | 0 | 81.31 ± 2.30 | 0.77751 |
+| LightGBM + ticket/cabin | 0 | 83.42 ± 2.79 | 0.76794 |
+| LightGBM + ticket/cabin + Optuna | 60 | 83.42 ± 1.95 | 0.76794 |
+| Gradient boosting + ticket/cabin (5 models, hard vote) | 0 | 83.43 ± 0.96 | 0.76794 |
+| Gradient boosting + ticket/cabin + Optuna (5 models, hard vote) | 10 | 83.00 ± 2.56 | **0.77990** |
 
-[result snapshot](docs/experiment-results.json), [experiment notes](docs/EXPERIMENTS.md).
+[earlier result snapshot](docs/experiment-results.json), [experiment notes](docs/EXPERIMENTS.md).
 
-![Local CV mean and fold SD versus Kaggle public accuracy.](docs/figures/accuracy-comparison.svg)
+![Earlier runs before the new ticket/cabin features: local CV versus Kaggle public accuracy.](docs/figures/accuracy-comparison.svg)
 
 CV and public scores are measured on different data.
 
@@ -68,7 +75,7 @@ Each run creates `artifacts/<exp_name>/<UTC timestamp>/`; earlier runs are prese
 | `run.mode` | `full`, `evaluate`, `train`, or `predict` |
 | `run.model_path` | Saved `model.joblib` or `model.pt`, required for `predict` |
 | `data.train_path`, `data.test_path` | CSV locations |
-| `features.feature_set` | `base_title_family` by default |
+| `features.feature_set` | Current: `base_title_family_extticket_extcabin` |
 | `preprocessing` | One-hot encoding; enable scaling for logistic regression and KNN |
 | `model.name`, `model.params` | Classifier and native constructor parameters |
 | `ensemble` | Member count, soft/hard voting or stacking, OOF folds and meta-model |
@@ -94,8 +101,11 @@ replace `tuning.search_space` with parameters for that model too.
 For seed ensembles, set `ensemble.n_models` and choose `soft`, `hard` or `stacking`
 in `ensemble.method`. Members use the same model family. KNN and custom DNNs use one model.
 
-Default features: `Pclass`, `Age`, `SibSp`, `Parch`, `Fare`, `Sex`, `Embarked`,
+Base features: `Pclass`, `Age`, `SibSp`, `Parch`, `Fare`, `Sex`, `Embarked`,
 plus `Title` and `FamilySize`. Preprocessing is fitted inside each training fold.
+
+I added ticket prefix/number and cabin letters, mean cabin number and count of numbered
+cabin entries, calculated within each passenger's row.
 
 ## Outputs
 

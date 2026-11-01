@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.24.2"
+__generated_with = "0.25.2"
 app = marimo.App()
 
 
@@ -19,7 +19,7 @@ def _():
 
 @app.cell
 def _(Path):
-    base_path = Path('/Users/platon/Documents/final_proj')
+    base_path = Path('/Users/platon/Documents/kaggle-titanic')
     return (base_path,)
 
 
