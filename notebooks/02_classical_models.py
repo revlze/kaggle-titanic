@@ -254,8 +254,9 @@ def _(accuracy_score, clone, np, pl, tqdm):
 
 @app.cell
 def _():
+    from data import TitanicData
     from evaluation import run_cv_experiment
-    return (run_cv_experiment,)
+    return TitanicData, run_cv_experiment
 
 
 @app.cell
@@ -690,7 +691,7 @@ def _(mo):
 
 @app.cell
 def _(
-    FEATURE_SET, N_TRIALS, OPTUNA_SEARCH, SEED, models, models_to_tune,
+    FEATURE_SET, N_TRIALS, OPTUNA_SEARCH, SEED, TitanicData, models, models_to_tune,
     param_distributions, pl, results_path, run_cv_experiment, train_dataset,
 ):
     optuna_results = None
@@ -699,10 +700,8 @@ def _(
             'kind': 'classical', 'estimator': models[name],
             'distributions': param_distributions[name],
         } for name in models_to_tune}
-        _run = run_cv_experiment(
-            train_dataset, _specs, results_path / 'nested_classical',
-            feature_set=FEATURE_SET, seed=SEED, n_trials=N_TRIALS,
-        )
+        _data = TitanicData(train_dataset, feature_set=FEATURE_SET, seed=SEED)
+        _run = run_cv_experiment(_data, _specs, results_path / 'nested_classical', n_trials=N_TRIALS)
         optuna_results = pl.DataFrame(_run['results'])
     optuna_results
     return (optuna_results,)

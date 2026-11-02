@@ -849,14 +849,15 @@ def _(mo):
 
 @app.cell
 def _():
+    from data import TitanicData
     from evaluation import run_cv_experiment
     from models import suggest_notebook_dnn
-    return run_cv_experiment, suggest_notebook_dnn
+    return TitanicData, run_cv_experiment, suggest_notebook_dnn
 
 
 @app.cell
 def _(
-    DEVICE, MyModel, MyModelEmb, N_TRIALS, OPTUNA_SEARCH, SEED,
+    DEVICE, MyModel, MyModelEmb, N_TRIALS, OPTUNA_SEARCH, SEED, TitanicData,
     pl, preprocess, preprocess_embedding, results_path,
     run_cv_experiment, suggest_notebook_dnn, train_dataset,
 ):
@@ -869,9 +870,10 @@ def _(
                            'embedding_columns': ['sex', 'embarked', 'cabin', 'ticket', 'title'],
                            'suggest_params': lambda trial: suggest_notebook_dnn(trial, embedding=True)},
         }
+        _data = TitanicData(train_dataset, feature_set='all', seed=SEED)
         _run = run_cv_experiment(
-            train_dataset, _specs, results_path / 'nested_all', feature_set='all',
-            seed=SEED, n_trials=N_TRIALS, epochs=15, device=DEVICE,
+            _data, _specs, results_path / 'nested_all',
+            n_trials=N_TRIALS, epochs=15, device=DEVICE,
         )
         frozen_comparison = pl.DataFrame(_run['results'])
     frozen_comparison

@@ -10,8 +10,10 @@ def _():
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     import marimo as mo
     import polars as pl
-    from evaluation import controlled_model_specs, plot_comparison, run_cv_experiment
-    return controlled_model_specs, mo, pl, plot_comparison, run_cv_experiment
+    from data import TitanicData
+    from evaluation import run_cv_experiment
+    from utils import controlled_model_specs, plot_comparison
+    return TitanicData, controlled_model_specs, mo, pl, plot_comparison, run_cv_experiment
 
 
 @app.cell(hide_code=True)
@@ -47,25 +49,25 @@ def _():
 
 
 @app.cell
-def _(mo, pl):
+def _(SEED, TitanicData, mo, pl):
     base_path = mo.notebook_location().parent
     train_dataset = pl.read_csv(base_path / "data/titanic/train.csv")
+    data = TitanicData(train_dataset, feature_set="base_title_family", seed=SEED)
     results_path = base_path / "notebooks/results/nested_comparison"
-    return results_path, train_dataset
+    return data, results_path, train_dataset
 
 
 @app.cell
 def _(
     MAX_EPOCHS, N_TRIALS, RUN_FULL, RUN_SMOKE, SEED,
-    controlled_model_specs, results_path, run_cv_experiment, train_dataset,
+    controlled_model_specs, data, results_path, run_cv_experiment, train_dataset,
 ):
     comparison_run = None
     if RUN_FULL and RUN_SMOKE:
         raise ValueError("Выбери один режим: RUN_FULL или RUN_SMOKE")
     if RUN_FULL or RUN_SMOKE:
         comparison_run = run_cv_experiment(
-            train_dataset, controlled_model_specs(train_dataset, SEED), results_path,
-            feature_set="base_title_family", seed=SEED,
+            data, controlled_model_specs(train_dataset, SEED), results_path,
             n_trials=N_TRIALS if RUN_FULL else 1,
             epochs=MAX_EPOCHS if RUN_FULL else 2,
             run_kind="full" if RUN_FULL else "smoke",
