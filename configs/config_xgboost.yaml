@@ -9,8 +9,8 @@ run:
   model_path: null
 
 data:
-  train_path: data/titanic/train.csv
-  test_path: data/titanic/test.csv
+  train_path: data/train.csv
+  test_path: data/test.csv
 
 features:
   feature_set: base_title_family

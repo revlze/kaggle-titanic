@@ -55,7 +55,7 @@ Optuna is off in the examples; set `tuning.enabled: true` to use the included se
 DNN examples: [MyModel](configs/config_dnn.yaml) and [MyModelEmb](configs/config_dnn_embedding.yaml).
 `custom/Name` loads a PyTorch model from `src/models.py`; input sizes are inferred automatically.
 
-Place the original Titanic CSVs at `data/titanic/train.csv` and `data/titanic/test.csv`, then edit
+Place the original Titanic CSVs at `data/train.csv` and `data/test.csv`, then edit
 [config.yaml](config.yaml) and run:
 
 ```bash
