@@ -2,8 +2,7 @@
 
 Titanic survival predictions.
 
-**Best recorded Kaggle public accuracy: [0.77990](docs/EXPERIMENTS.md#source-and-matching-boundary)**:
-five Gradient Boosting models with hard voting, Optuna and the new ticket/cabin features.
+**Best recorded Kaggle public accuracy: 0.77990 — five Gradient Boosting models with hard voting, Optuna and the aggregated features family-size; title; extended ticket and cabin features.
 
 ```mermaid
 flowchart LR
@@ -19,8 +18,7 @@ flowchart LR
 ## Recorded results
 
 Local CV is **mean accuracy (%) ± fold SD (percentage points)**. Fixed models use
-5-fold CV; tuned models use 5 outer / 3 inner folds on the same 712 development rows
-(idk, maybe nested CV is not needed here).
+5-fold CV; tuned models use nested cv: 5 outer / 3 inner folds (idk, maybe nested CV is not needed here).
 
 | Model / setup | Optuna trials / search | Local CV, % ± SD | Public accuracy |
 |---|---:|---:|---:|
@@ -40,15 +38,13 @@ Local CV is **mean accuracy (%) ± fold SD (percentage points)**. Fixed models u
 | Gradient boosting + ticket/cabin (5 models, hard vote) | 0 | 83.43 ± 0.96 | 0.76794 |
 | Gradient boosting + ticket/cabin + Optuna (5 models, hard vote) | 10 | 83.00 ± 2.56 | **0.77990** |
 
-[earlier result snapshot](docs/experiment-results.json), [experiment notes](docs/EXPERIMENTS.md).
+[earlier result snapshot](docs/experiment-results.json), [some experiment notes](docs/EXPERIMENTS.md).
 
 ![Earlier runs before the new ticket/cabin features: local CV versus Kaggle public accuracy.](docs/figures/accuracy-comparison.svg)
 
-CV and public scores are measured on different data.
-
 ## Run and configure
 
-Model examples are in [configs/](configs/). Copy one to `config.yaml`, e.g.:
+Model examples are in [configs/](configs/). Using configs:
 
 ```bash
 cp configs/config_catboost.yaml config.yaml
@@ -85,10 +81,6 @@ Each run creates `artifacts/<exp_name>/<UTC timestamp>/`; earlier runs are prese
 | `metric.name` | `accuracy`, the supported primary metric |
 | `output.dir` | `artifacts` |
 
-`full` evaluates, fits the final model, and writes predictions. `evaluate` only
-runs CV; `train` fits the final model, with parameter selection if enabled.
-For inference without training:
-
 ```yaml
 run:
   mode: predict
@@ -102,16 +94,20 @@ For seed ensembles, set `ensemble.n_models` and choose `soft`, `hard` or `stacki
 in `ensemble.method`. Members use the same model family. KNN and custom DNNs use one model.
 
 Base features: `Pclass`, `Age`, `SibSp`, `Parch`, `Fare`, `Sex`, `Embarked`,
-plus `Title` and `FamilySize`. Preprocessing is fitted inside each training fold.
+plus `Title`, `FamilySize`, `TicketString`, `TicketNum`, `CabinLet`, `CabinNum`, `CabinCount`. Preprocessing is fitted inside each training fold.
 
-I added ticket prefix/number and cabin letters, mean cabin number and count of numbered
+`TicketString`, `TicketNum`: ticket prefix/number and cabin letters
+
+`CabinLet`, `CabinNum`, `CabinCount`: mean cabin number and count of numbered
 cabin entries, calculated within each passenger's row.
 
 ## Outputs
 
-Open `summary.md` in the run folder for accuracy and final parameters.
+Check `summary.md` in the run folder for accuracy and final parameters.
 `metrics.json` has the same scores. CV accuracy is the evaluation result;
 the final Optuna score is used for parameter selection.
+Holdout accuracy is measured on the reserved rows before the full-data refit.
+`evaluate` runs CV and holdout evaluation; `full` then refits on all labeled rows.
 
 `submission.csv` is ready for Kaggle. Classical models use `model.joblib`;
 DNNs use `model.pt` plus `preprocess.joblib` in the same run folder.
