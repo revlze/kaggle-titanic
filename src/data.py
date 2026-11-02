@@ -1,10 +1,42 @@
-"""Load Titanic CSVs and reproduce the shared development/holdout split."""
+"""Load Titanic data and keep one shared development/holdout split."""
 
 from pathlib import Path
 
 import numpy as np
 import polars as pl
 from sklearn.model_selection import train_test_split
+
+from features import make_features
+
+
+class TitanicData:
+    """Store labeled features and one development/holdout split for a run.
+
+    CV and training share this instance and its X_dev/y_dev, X_holdout/y_holdout
+    and original row indices. Feature extraction is row-wise; preprocessing
+    statistics are learned later inside model fits.
+    """
+
+    def __init__(self, train_dataset, *, feature_set, seed, development_size=0.8):
+        """Build features and create the stratified split once.
+
+        Args:
+            train_dataset: Raw labeled passenger DataFrame.
+            feature_set: Feature variant passed to make_features.
+            seed: Random seed for the development/holdout split.
+            development_size: Fraction of rows assigned to development.
+        """
+        self.train_dataset = train_dataset
+        self.feature_set = feature_set
+        self.seed = seed
+        self.development_size = development_size
+        self.X, self.numeric_columns, self.categorical_columns = make_features(train_dataset, feature_set)
+        self.y = train_dataset["Survived"].to_numpy()
+        (self.X_dev, self.X_holdout, self.y_dev, self.y_holdout,
+         self.train_i, self.holdout_i) = train_test_split(
+            self.X, self.y, np.arange(len(self.y)), train_size=development_size,
+            stratify=self.y, random_state=seed,
+        )
 
 
 def resolve_path(path, root):
@@ -56,19 +88,3 @@ def load_data(path, *, training=True):
     elif "Survived" in df.columns:
         raise ValueError("Inference CSV must not contain Survived")
     return df
-
-
-def split_development(y, seed, development_size=0.8):
-    """Split original row indices into stratified development and holdout sets.
-
-    Args:
-        y: Target labels in the original dataset order.
-        seed: Random seed for the shuffled split.
-        development_size: Fraction of rows assigned to development.
-
-    Returns:
-        (train_i, holdout_i): NumPy index arrays into the original dataset.
-    """
-    return train_test_split(
-        np.arange(len(y)), train_size=development_size, stratify=y, random_state=seed,
-    )
