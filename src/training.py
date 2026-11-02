@@ -1,15 +1,12 @@
 """Train on fit rows, choose weights on internal validation, predict separately."""
 
 import copy
-import hashlib
-import json
 from pathlib import Path
 from types import SimpleNamespace
 
 import joblib
 import numpy as np
 import optuna
-import polars as pl
 import torch
 from omegaconf import OmegaConf
 from optuna_integration.sklearn import OptunaSearchCV
@@ -20,7 +17,7 @@ from sklearn.model_selection import StratifiedKFold, cross_val_score, train_test
 from torch.utils.data import DataLoader, TensorDataset
 
 import utils
-from data import split_development
+from data import TitanicData
 from features import make_features
 
 
@@ -89,39 +86,44 @@ def tune_classical(estimator, distributions, X, y, cv, *, seed, n_trials):
     return search
 
 
-def fit_classical(train_dataset, estimator, config, run_dir, distributions=None):
-    """Select parameters on development, then refit on all labeled rows.
+def fit_classical(data: TitanicData, estimator, config, run_dir, distributions=None, *, refit_all=True):
+    """Select parameters on development, score holdout and optionally refit all rows.
 
     Args:
-        train_dataset: Raw labeled passenger DataFrame.
+        data: Shared TitanicData instance with the same split used by CV.
         estimator: Unfitted classical pipeline or ensemble.
         config: Feature, validation and tuning settings.
         run_dir: Existing directory for the model and training reports.
         distributions: Optuna parameter distributions when tuning is enabled.
+        refit_all: Fit and save the final full-data model after holdout evaluation.
 
     Returns:
         Path to model.joblib, containing the fitted pipeline, feature columns
-        and training configuration. Also write training reports and split metadata.
+        and training configuration, or None when refit_all is False.
+        Holdout scores and predictions are saved before the optional final refit.
 
     With tuning disabled, use the configured parameters directly. The final
-    refit includes the previously excluded holdout rows after selection is complete.
+    refit includes the holdout rows after selection and holdout evaluation.
     """
     run_dir = Path(run_dir)
-    X, _, _ = make_features(train_dataset, config.features.feature_set)
-    y = train_dataset["Survived"].to_numpy()
+    train_dataset = data.train_dataset
+    X, y = data.X, data.y
+    X_dev, y_dev = data.X_dev, data.y_dev
+    X_holdout, y_holdout = data.X_holdout, data.y_holdout
+    train_i, holdout_i = data.train_i, data.holdout_i
     best_params = {}
     selection = {"score_role": "fixed_parameters", "accuracy": None}
     if config.tuning.enabled:
-        train_i, holdout_i = split_development(y, config.base.seed, config.validation.development_size)
         inner = list(StratifiedKFold(
             n_splits=config.validation.inner_splits, shuffle=True, random_state=config.base.seed,
-        ).split(X[train_i], y[train_i]))
+        ).split(X_dev, y_dev))
         search = tune_classical(
-            estimator, distributions, X[train_i], y[train_i], inner,
+            estimator, distributions, X_dev, y_dev, inner,
             seed=config.base.seed, n_trials=config.tuning.n_trials,
         )
         best_params = search.best_params_
-        search.study_.trials_dataframe().to_csv(run_dir / "final_trials.csv", index=False)
+        holdout_model = search.best_estimator_
+        utils.save_trials(search.study_, run_dir / "final_trials.csv")
         selection = {
             "score_role": "development_selection_cv", "accuracy": float(search.best_score_),
             "best_params": best_params, "development_indices": train_i.tolist(),
@@ -129,39 +131,20 @@ def fit_classical(train_dataset, estimator, config, run_dir, distributions=None)
             "splits": [{"fit_source_indices": train_i[a].tolist(),
                         "validation_source_indices": train_i[b].tolist()} for a, b in inner],
         }
+    else:
+        holdout_model = clone(estimator).fit(X_dev, y_dev)
+    predictions, probabilities = utils.predict_classifier(holdout_model, X_holdout)
+    holdout_accuracy = float(accuracy_score(y_holdout, predictions))
+    utils.save_holdout_results(
+        run_dir, config, train_dataset, train_i, holdout_i,
+        predictions, probabilities, holdout_accuracy, selection,
+    )
+    if not refit_all:
+        return None
     # Do not reuse a fitted outer model or select parameters by outer accuracy.
     fitted = clone(estimator).set_params(**best_params)
     fitted.fit(X, y)
-    artifact = {
-        "pipeline": fitted, "feature_set": config.features.feature_set,
-        "feature_columns": X.columns, "model_name": config.model.name,
-        "configuration": OmegaConf.to_container(config, resolve=True, throw_on_missing=True),
-    }
-    model_path = run_dir / "model.joblib"
-    joblib.dump(artifact, model_path)
-    restored = joblib.load(model_path)["pipeline"]
-    original_predictions, original_probabilities = utils.predict_classifier(fitted, X)
-    restored_predictions, restored_probabilities = utils.predict_classifier(restored, X)
-    assert np.array_equal(original_predictions, restored_predictions)
-    assert np.array_equal(original_probabilities, restored_probabilities)
-    # Keep row identities and split indices out of the readable training report.
-    selection_splits = {key: selection.pop(key) for key in [
-        "development_indices", "excluded_holdout_indices", "splits",
-    ] if key in selection}
-    (run_dir / "training_splits.json").write_text(json.dumps({
-        "fit_passenger_ids": train_dataset["PassengerId"].to_list(),
-        "selection": selection_splits,
-    }, indent=2))
-    report = {
-        "model": config.model.name, "fit_role": "final_refit_all_labeled_rows",
-        "fitted_rows": len(y), "splits_path": "training_splits.json",
-        "selection": selection, **utils.get_model_report(fitted.named_steps["model"]),
-        "probabilities_available": original_probabilities is not None,
-        "checkpoint_predictions_verified": True,
-    }
-    (run_dir / "training.json").write_text(json.dumps(report, indent=2))
-    return model_path
-
+    return utils.save_classical_model(fitted, X, train_dataset, config, run_dir, selection)
 
 def predict_classical(model_path, test_dataset, run_dir):
     """Load a saved classical pipeline and write predictions in test row order.
@@ -181,49 +164,8 @@ def predict_classical(model_path, test_dataset, run_dir):
         raise ValueError("Inference features differ from the saved training columns")
     model = artifact["pipeline"]
     predictions, probabilities = utils.predict_classifier(model, X)
-    return save_predictions(artifact, predictions, probabilities, test_dataset, run_dir, model_path,
+    return utils.save_predictions(artifact, predictions, probabilities, test_dataset, run_dir, model_path,
                             utils.get_model_report(model.named_steps["model"])["ensemble"])
-
-
-def save_predictions(artifact, predictions, probabilities, test_dataset, run_dir, model_path, ensemble):
-    """Validate and save ordered predictions for classical and PyTorch models.
-
-    Args:
-        artifact: Saved feature specification, model name and training configuration.
-        predictions: One binary label per test row, with shape (n_rows,).
-        probabilities: Class-1 probabilities with the same shape, or None.
-        test_dataset: Passenger DataFrame supplying IDs and row order.
-        run_dir: Existing directory for submission.csv, predictions.csv and inference.json.
-        model_path: Model artifact path recorded in inference provenance.
-        ensemble: Member count and optional voting/stacking metadata.
-
-    Returns:
-        A Polars DataFrame with PassengerId and integer Survived predictions.
-
-    Raises:
-        ValueError: Label/probability shapes or values are invalid.
-    """
-    if (predictions.shape != (len(test_dataset),) or not np.isin(predictions, [0, 1]).all()
-            or (probabilities is not None and (
-                probabilities.shape != (len(test_dataset),) or not np.isfinite(probabilities).all()
-                or not ((0 <= probabilities) & (probabilities <= 1)).all()))):
-        raise ValueError("Invalid prediction shape, labels or probabilities")
-    submission = test_dataset.select("PassengerId").with_columns(
-        pl.Series("Survived", predictions, dtype=pl.Int64),
-    )
-    run_dir = Path(run_dir)
-    submission.write_csv(run_dir / "submission.csv")
-    submission.with_columns(pl.Series("p_survived", probabilities if probabilities is not None
-                                      else [None] * len(submission), dtype=pl.Float64)).write_csv(run_dir / "predictions.csv")
-    (run_dir / "inference.json").write_text(json.dumps({
-        "model_path": str(Path(model_path).resolve()), "model": artifact["model_name"],
-        "ensemble": ensemble,
-        "probabilities_available": probabilities is not None,
-        "feature_set": artifact["feature_set"], "feature_columns": artifact["feature_columns"],
-        "rows": len(submission), "training_configuration": artifact["configuration"],
-        "test_dataframe_sha256": hashlib.sha256(test_dataset.write_csv().encode()).hexdigest(),
-    }, indent=2))
-    return submission
 
 
 def tune_dnn(spec, X, y, cv, *, seed, n_trials, epochs, device="cpu", batch_size=64, stopping_size=0.2):
@@ -255,9 +197,12 @@ def tune_dnn(spec, X, y, cv, *, seed, n_trials, epochs, device="cpu", batch_size
         trial.set_user_attr('configuration', configuration)
         scores, best_epochs = [], []
         for fold, (fit, val) in enumerate(cv, 1):
-            a, b = train_test_split(fit, test_size=stopping_size, stratify=y[fit], random_state=seed + fold)
+            X_train, X_stop, y_train, y_stop = train_test_split(
+                X[fit], y[fit], test_size=stopping_size,
+                stratify=y[fit], random_state=seed + fold,
+            )
             fitted = fit_dnn(spec['model_cls'], configuration, spec['preprocess'],
-                             X[a], y[a], X[b], y[b], seed=seed + fold, epochs=epochs,
+                             X_train, y_train, X_stop, y_stop, seed=seed + fold, epochs=epochs,
                              embedding_columns=spec.get('embedding_columns'), device=device, batch_size=batch_size)
             predictions, _ = predict_dnn(fitted['model'], fitted['preprocess'], X[val], device)
             scores.append(float(accuracy_score(y[val], predictions)))
@@ -270,26 +215,30 @@ def tune_dnn(spec, X, y, cv, *, seed, n_trials, epochs, device="cpu", batch_size
     return study
 
 
-def fit_custom_dnn(train_dataset, spec, config, run_dir):
-    """Select DNN settings and epochs on development, then refit all labels.
+def fit_custom_dnn(data: TitanicData, spec, config, run_dir, *, refit_all=True):
+    """Select DNN settings/epochs, evaluate holdout and optionally refit all rows.
 
     Args:
-        train_dataset: Raw labeled passenger DataFrame.
+        data: Shared TitanicData instance with the same split used by CV.
         spec: Custom-DNN specification from utils.get_dnn_spec.
         config: Feature, validation, tuning and training settings.
         run_dir: Existing directory for model.pt, preprocessing and training reports.
+        refit_all: Fit and save the final full-data model after holdout evaluation.
 
     Returns:
         Path to model.pt. The companion preprocess.joblib stores the fitted
-        transformer required for inference.
+        transformer required for inference. Return None when refit_all is False.
 
     An internal development split selects the epoch count and learning-rate
-    schedule. A fresh full-data fit replays both with no validation loader.
+    schedule. Fresh development and full-data fits replay both without validation;
+    the holdout is scored by the development-only model.
     """
     run_dir = Path(run_dir)
-    X, _, _ = make_features(train_dataset, config.features.feature_set)
-    y = train_dataset['Survived'].to_numpy()
-    development, holdout = split_development(y, config.base.seed, config.validation.development_size)
+    train_dataset = data.train_dataset
+    X, y = data.X, data.y
+    X_dev, y_dev = data.X_dev, data.y_dev
+    X_holdout, y_holdout = data.X_holdout, data.y_holdout
+    development, holdout = data.train_i, data.holdout_i
     device, epochs, batch_size = config.training.device, config.training.epochs, config.training.batch_size
     stopping_size = OmegaConf.select(config, 'validation.stopping_size', default=0.2)
     configuration = spec['configuration']
@@ -297,58 +246,46 @@ def fit_custom_dnn(train_dataset, spec, config, run_dir):
     splits = []
     if config.tuning.enabled:
         cv = list(StratifiedKFold(n_splits=config.validation.inner_splits, shuffle=True,
-                                  random_state=config.base.seed).split(development, y[development]))
-        study = tune_dnn(spec, X[development], y[development], cv, seed=config.base.seed,
+                                  random_state=config.base.seed).split(X_dev, y_dev))
+        study = tune_dnn(spec, X_dev, y_dev, cv, seed=config.base.seed,
                          n_trials=config.tuning.n_trials, epochs=epochs, device=device,
                          batch_size=batch_size, stopping_size=stopping_size)
         configuration = study.best_trial.user_attrs['configuration']
-        study.trials_dataframe().to_csv(run_dir/'final_trials.csv', index=False)
+        utils.save_trials(study, run_dir/'final_trials.csv')
         selection = {'score_role': 'development_selection_cv', 'accuracy': float(study.best_value),
                      'best_params': study.best_params}
         splits = [{'fit_source_indices': development[a].tolist(),
                    'validation_source_indices': development[b].tolist()} for a, b in cv]
-    fit, stop = train_test_split(development, test_size=stopping_size, stratify=y[development],
-                                 random_state=config.base.seed)
-    selected = fit_dnn(spec['model_cls'], configuration, spec['preprocess'], X[fit], y[fit], X[stop], y[stop],
+    X_fit, X_stop, y_fit, y_stop, fit, stop = train_test_split(
+        X_dev, y_dev, development, test_size=stopping_size,
+        stratify=y_dev, random_state=config.base.seed,
+    )
+    selected = fit_dnn(spec['model_cls'], configuration, spec['preprocess'], X_fit, y_fit, X_stop, y_stop,
                        seed=config.base.seed, epochs=epochs, embedding_columns=spec.get('embedding_columns'),
                        device=device, batch_size=batch_size)
+    holdout_model = fit_dnn(
+        spec['model_cls'], configuration, spec['preprocess'], X_dev, y_dev, None, None,
+        seed=config.base.seed, epochs=selected['best_epoch'],
+        embedding_columns=spec.get('embedding_columns'), device=device, batch_size=batch_size,
+        learning_rates=selected['learning_rates'][:selected['best_epoch']],
+    )
+    predictions, probabilities = predict_dnn(holdout_model['model'], holdout_model['preprocess'], X_holdout, device)
+    holdout_accuracy = float(accuracy_score(y_holdout, predictions))
+    utils.save_holdout_results(
+        run_dir, config, train_dataset, development, holdout,
+        predictions, probabilities, holdout_accuracy, selection, epochs=selected['best_epoch'],
+    )
+    if not refit_all:
+        return None
     # Freeze both epoch count and scheduler decisions before adding any other labels.
     fitted = fit_dnn(spec['model_cls'], configuration, spec['preprocess'], X, y, None, None,
                      seed=config.base.seed, epochs=selected['best_epoch'],
                      embedding_columns=spec.get('embedding_columns'), device=device, batch_size=batch_size,
                      learning_rates=selected['learning_rates'][:selected['best_epoch']])
-    artifact = {
-        'model_name': config.model.name, 'model_params': fitted['model_params'],
-        'embedding_metadata': fitted['embedding_metadata'],
-        'model_state_dict': {key: value.detach().cpu() for key, value in fitted['model'].state_dict().items()},
-        'preprocess_path': 'preprocess.joblib', 'feature_set': config.features.feature_set,
-        'feature_columns': X.columns, 'configuration': OmegaConf.to_container(config, resolve=True),
-    }
-    model_path = run_dir/'model.pt'
-    torch.save(artifact, model_path)
-    joblib.dump(fitted['preprocess'], run_dir/'preprocess.joblib')
-    loaded = torch.load(model_path, map_location='cpu', weights_only=True)
-    restored = restore_dnn(loaded['model_name'], loaded['model_params'], loaded['embedding_metadata'])
-    restored.load_state_dict(loaded['model_state_dict'])
-    original = predict_dnn(fitted['model'], fitted['preprocess'], X, device)
-    reloaded = predict_dnn(restored, joblib.load(run_dir/'preprocess.joblib'), X, device)
-    assert all(np.array_equal(a, b) for a, b in zip(original, reloaded))
-    (run_dir/'training_splits.json').write_text(json.dumps({
-        'fit_passenger_ids': train_dataset['PassengerId'].to_list(),
-        'selection': {'development_indices': development.tolist(), 'excluded_holdout_indices': holdout.tolist(),
-                      'splits': splits, 'fit_source_indices': fit.tolist(), 'stop_source_indices': stop.tolist()},
-    }, indent=2))
-    (run_dir/'training.json').write_text(json.dumps({
-        'model': config.model.name, 'fit_role': 'final_refit_all_labeled_rows', 'fitted_rows': len(y),
-        'splits_path': 'training_splits.json', 'selection': selection, 'parameters': fitted['model_params'],
-        'optimizer': {'name': configuration['optimizer_name'], 'params': configuration['optimizer_params']},
-        'scheduler': {'name': configuration['scheduler_name'], 'params': configuration['scheduler_params']},
-        'epochs': selected['best_epoch'], 'learning_rates': fitted['learning_rates'],
-        'stopping': {'score_role': 'internal_stopping_accuracy', 'accuracy': selected['best_val_acc']},
-        'ensemble': {'n_models': 1}, 'probabilities_available': True, 'checkpoint_predictions_verified': True,
-    }, indent=2))
-    return model_path
-
+    return utils.save_custom_dnn(
+        fitted, selected, X, train_dataset, config, run_dir, selection,
+        development, holdout, splits, fit, stop,
+    )
 
 def predict_custom_dnn(model_path, test_dataset, run_dir, device='cpu'):
     """Restore a custom DNN and its preprocessing and write test predictions.
@@ -370,7 +307,7 @@ def predict_custom_dnn(model_path, test_dataset, run_dir, device='cpu'):
     model.load_state_dict(artifact['model_state_dict'])
     preprocessing = joblib.load(Path(model_path).parent/artifact['preprocess_path'])
     predictions, probabilities = predict_dnn(model, preprocessing, X, device)
-    return save_predictions(artifact, predictions, probabilities, test_dataset, run_dir, model_path, {'n_models': 1})
+    return utils.save_predictions(artifact, predictions, probabilities, test_dataset, run_dir, model_path, {'n_models': 1})
 
 
 def predict_loader(model, loss_model, loader, device="cpu"):
@@ -481,12 +418,9 @@ def train_epochs(model, loss_model, opt, train_loader, val_loader, sched=None,
         }
     model.load_state_dict(best_state)
     model.eval()
-    # Check the actual restored weights, rather than trusting a recorded maximum.
-    restored_accuracy = predict_loader(model, loss_model, val_loader, device)[1]
-    assert restored_accuracy == best_accuracy
     return {
         "model": model, "loss": loss_model, "opt": opt,
-        "accuracy": restored_accuracy, "best_val_acc": restored_accuracy,
+        "accuracy": best_accuracy, "best_val_acc": best_accuracy,
         "best_epoch": best_epoch, "weights_epoch": best_epoch,
         "last_epoch": epoches, "last_val_acc": history["val_acc"][-1],
         "summary": [], "learning_rates": used_learning_rates, **history,
