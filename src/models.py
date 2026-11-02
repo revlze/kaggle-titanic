@@ -4,9 +4,6 @@ import optuna
 import torch
 from torch import nn
 
-# Keep previous imports working; config-based construction now lives in utils.py.
-from utils import get_pipeline as make_classical_pipeline, get_search_space as make_search_space
-
 
 class SmallMLP(nn.Module):
     """Small ReLU MLP with dropout for the controlled model comparison."""
