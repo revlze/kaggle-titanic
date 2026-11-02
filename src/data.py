@@ -1,4 +1,4 @@
-"""Load Titanic data and keep one shared development/holdout split."""
+"""Load Titanic data and keep one shared train/test split."""
 
 from pathlib import Path
 
@@ -10,31 +10,34 @@ from features import make_features
 
 
 class TitanicData:
-    """Store labeled features and one development/holdout split for a run.
+    """Store labeled features and one train/test split for a run.
 
-    CV and training share this instance and its X_dev/y_dev, X_holdout/y_holdout
+    CV and training share this instance and its X_train/y_train, X_test/y_test
     and original row indices. Feature extraction is row-wise; preprocessing
     statistics are learned later inside model fits.
+
+    X_test/y_test are labeled rows reserved from train.csv. Kaggle test.csv
+    is loaded separately for inference.
     """
 
-    def __init__(self, train_dataset, *, feature_set, seed, development_size=0.8):
+    def __init__(self, train_dataset, *, feature_set, seed, train_size=0.8):
         """Build features and create the stratified split once.
 
         Args:
             train_dataset: Raw labeled passenger DataFrame.
             feature_set: Feature variant passed to make_features.
-            seed: Random seed for the development/holdout split.
-            development_size: Fraction of rows assigned to development.
+            seed: Random seed for the train/test split.
+            train_size: Fraction of rows assigned to train.
         """
         self.train_dataset = train_dataset
         self.feature_set = feature_set
         self.seed = seed
-        self.development_size = development_size
+        self.train_size = train_size
         self.X, self.numeric_columns, self.categorical_columns = make_features(train_dataset, feature_set)
         self.y = train_dataset["Survived"].to_numpy()
-        (self.X_dev, self.X_holdout, self.y_dev, self.y_holdout,
-         self.train_i, self.holdout_i) = train_test_split(
-            self.X, self.y, np.arange(len(self.y)), train_size=development_size,
+        (self.X_train, self.X_test, self.y_train, self.y_test,
+         self.train_i, self.test_i) = train_test_split(
+            self.X, self.y, np.arange(len(self.y)), train_size=train_size,
             stratify=self.y, random_state=seed,
         )
 

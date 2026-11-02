@@ -53,10 +53,10 @@ ensemble:
   n_models: 1
 
 validation:
-  development_size: 0.8
+  train_size: 0.8
   n_splits: 5
   inner_splits: 3
-  stopping_size: 0.2
+  val_size: 0.2
 
 tuning:
   enabled: false

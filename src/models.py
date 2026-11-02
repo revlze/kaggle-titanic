@@ -2,7 +2,66 @@
 
 import optuna
 import torch
+from omegaconf import OmegaConf
 from torch import nn
+
+import utils
+
+
+def build_dnn(model_cls, model_params, preprocessing, input_dim, embedding_columns=None):
+    """Infer input sizes from fitted preprocessing and instantiate a fresh DNN.
+
+    Args:
+        model_cls: PyTorch module class or configured model name.
+        model_params: Architecture settings; inp is inferred here.
+        preprocessing: Fitted ColumnTransformer with output slices and categories.
+        input_dim: Width of its transformed feature matrix.
+        embedding_columns: Ordered category names used for embedding width settings.
+
+    Returns:
+        (model, params, embedding_metadata): The new model, resolved constructor
+        parameters and optional numeric/category slices and vocabulary sizes.
+        Embedding vocabularies reserve one extra slot for unknown categories.
+    """
+    params = model_params.copy()
+    params["inp"] = input_dim
+    embedding_metadata = None
+    if embedding_columns:
+        numeric = preprocessing.output_indices_["numeric"]
+        categorical = preprocessing.output_indices_["categorical"]
+        sizes = [len(c) + 1 for c in preprocessing.named_transformers_["categorical"].named_steps["encoder"].categories_]
+        params["inp"] = numeric.stop - numeric.start + sum(
+            params.get(f"{column}_emb_dim", 2) for column in embedding_columns
+        )
+        embedding_metadata = {
+            "num_slice": [numeric.start, numeric.stop],
+            "cat_slice": [categorical.start, categorical.stop],
+            "cat_sizes": sizes,
+        }
+    return restore_dnn(model_cls, params, embedding_metadata), params, embedding_metadata
+
+
+def restore_dnn(model_cls, model_params, embedding_metadata=None):
+    """Instantiate a DNN architecture from constructor and embedding metadata.
+
+    Args:
+        model_cls: PyTorch module class or configured model name.
+        model_params: Saved constructor parameters, including inferred input size.
+        embedding_metadata: Optional serialized slices and category vocabulary sizes.
+
+    Returns:
+        A newly initialized module. The caller loads checkpoint weights into it.
+    """
+    params = model_params.copy()
+    if embedding_metadata:
+        params.update({
+            "num_slice": slice(*embedding_metadata["num_slice"]),
+            "cat_slice": slice(*embedding_metadata["cat_slice"]),
+            "cat_sizes": embedding_metadata["cat_sizes"],
+        })
+    if isinstance(model_cls, str):
+        return utils.get_model(OmegaConf.create({'model': {'name': model_cls, 'params': {}}}), **params)
+    return model_cls(**params)
 
 
 class SmallMLP(nn.Module):

@@ -368,7 +368,7 @@ def write_run_summary(run_dir):
 
     Returns:
         The metrics dictionary written to disk. Missing or unfinished stages
-        leave their scores unset. CV, holdout and final selection scores are
+        leave their scores unset. CV, test and final selection scores are
         recorded separately; this function performs no model fitting or selection.
     """
     run_dir = Path(run_dir)
@@ -378,8 +378,8 @@ def write_run_summary(run_dir):
     evaluation = json.loads(evaluation_path.read_text()) if evaluation_path.exists() else {}
     training_path = run_dir / "training.json"
     training = json.loads(training_path.read_text()) if training_path.exists() else {}
-    holdout_path = run_dir / manifest.get("holdout", "holdout.json")
-    holdout = json.loads(holdout_path.read_text()) if holdout_path.exists() else {}
+    test_path = run_dir / manifest.get("test", "test.json")
+    test = json.loads(test_path.read_text()) if test_path.exists() else {}
     inference_path = run_dir / "inference.json"
     inference = json.loads(inference_path.read_text()) if inference_path.exists() else {}
     score = evaluation["results"][0] if evaluation.get("status") == "complete" else {}
@@ -404,9 +404,9 @@ def write_run_summary(run_dir):
         "cv_accuracy_std": score.get("outer_accuracy_std"),
         "cv_fold_accuracies": score.get("outer_fold_scores", []),
         "oof_accuracy": score.get("outer_oof_accuracy"),
-        "holdout_accuracy": holdout.get("accuracy"),
-        "holdout_rows": holdout.get("rows"),
-        "holdout_fit_rows": holdout.get("fit_rows"),
+        "test_accuracy": test.get("accuracy"),
+        "test_rows": test.get("rows"),
+        "test_train_rows": test.get("train_rows"),
         "evaluation_rows": len(evaluation.get("train_indices", [])) if score else None,
         "final_selection_cv_accuracy": selection.get("accuracy"),
         "trials_per_search": config.tuning.n_trials if config.tuning.enabled else 0,
@@ -443,10 +443,10 @@ def write_run_summary(run_dir):
     if score:
         lines += [
             f"## CV accuracy: {metrics['cv_accuracy_mean']:.2%} ± {metrics['cv_accuracy_std'] * 100:.2f} pp", "",
-            "This is the quality estimate on held-out development folds. The ± value is fold SD, "
+            "This is the quality estimate on validation folds within train. The ± value is fold SD, "
             "not a confidence interval.", "",
             f"Protocol: **{metrics['evaluation_method']}**, {evaluation['cv']['outer_folds']} evaluation folds, "
-            f"{metrics['evaluation_rows']} development rows.", "",
+            f"{metrics['evaluation_rows']} train rows.", "",
         ]
         if evaluation.get("tuning_enabled"):
             lines += [f"Optuna: {evaluation['cv']['inner_folds']} inner folds, "
@@ -456,18 +456,18 @@ def write_run_summary(run_dir):
         lines += ["", f"Pooled OOF accuracy: **{metrics['oof_accuracy']:.2%}**.", ""]
     else:
         lines += ["CV accuracy: **not evaluated in this run**.", ""]
-    if holdout:
+    if test:
         lines += [
-            f"## Holdout accuracy: {metrics['holdout_accuracy']:.2%}", "",
-            f"The model was fitted on **{metrics['holdout_fit_rows']} development rows** and scored on "
-            f"**{metrics['holdout_rows']} holdout rows** before any full-data refit. "
-            "This is the previously viewed exploratory holdout.", "",
+            f"## Local test accuracy: {metrics['test_accuracy']:.2%}", "",
+            f"The model was fitted on **{metrics['test_train_rows']} train rows** and scored on "
+            f"**{metrics['test_rows']} test rows** before any full-data refit. "
+            "This is the previously viewed exploratory test.", "",
         ]
     if training:
         lines += ["## Final model", ""]
         if 'epochs' in training:
             lines += [f"Epochs: **{training['epochs']}**. The epoch count and learning-rate schedule were "
-                      "selected on internal development validation, then replayed during a fresh full-data refit.", "",
+                      "selected on internal validation, then replayed during a fresh full-data refit.", "",
                       "Optimizer:", "", "```yaml", OmegaConf.to_yaml(OmegaConf.create(training['optimizer'])).rstrip(),
                       "```", ""]
         if metrics["final_selection_cv_accuracy"] is not None:
@@ -495,8 +495,8 @@ def write_run_summary(run_dir):
     for path, label in [
         ("training.json", "Final parameter selection and fitted model parameters"),
         ("training_splits.json", "Technical row identities and selection splits"),
-        ("holdout.json", "Development-only model accuracy on holdout"),
-        ("holdout_predictions.csv", "Holdout labels and predictions"),
+        ("test.json", "Train-only model accuracy on test"),
+        ("test_predictions.csv", "Test labels and predictions"),
         ("final_trials.csv", "Trials of the separate final Optuna search"),
         ("evaluation/results.json", "Detailed evaluation protocol and fold parameters"),
         ("evaluation/oof.csv", "Out-of-fold predictions"),
@@ -551,14 +551,14 @@ def plot_comparison(summary, oof, run_kind="full", feature_set="base_title_famil
 
 
 
-def save_predictions(artifact, predictions, probabilities, test_dataset, run_dir, model_path, ensemble):
+def save_predictions(artifact, predictions, probabilities, kaggle_test, run_dir, model_path, ensemble):
     """Validate and save ordered predictions for classical and PyTorch models.
 
     Args:
         artifact: Saved feature specification, model name and training configuration.
-        predictions: One binary label per test row, with shape (n_rows,).
+        predictions: One binary label per Kaggle test row, with shape (n_rows,).
         probabilities: Class-1 probabilities with the same shape, or None.
-        test_dataset: Passenger DataFrame supplying IDs and row order.
+        kaggle_test: Passenger DataFrame supplying IDs and row order.
         run_dir: Existing directory for submission.csv, predictions.csv and inference.json.
         model_path: Model artifact path recorded in inference provenance.
         ensemble: Member count and optional voting/stacking metadata.
@@ -569,12 +569,12 @@ def save_predictions(artifact, predictions, probabilities, test_dataset, run_dir
     Raises:
         ValueError: Label/probability shapes or values are invalid.
     """
-    if (predictions.shape != (len(test_dataset),) or not np.isin(predictions, [0, 1]).all()
+    if (predictions.shape != (len(kaggle_test),) or not np.isin(predictions, [0, 1]).all()
             or (probabilities is not None and (
-                probabilities.shape != (len(test_dataset),) or not np.isfinite(probabilities).all()
+                probabilities.shape != (len(kaggle_test),) or not np.isfinite(probabilities).all()
                 or not ((0 <= probabilities) & (probabilities <= 1)).all()))):
         raise ValueError("Invalid prediction shape, labels or probabilities")
-    submission = test_dataset.select("PassengerId").with_columns(
+    submission = kaggle_test.select("PassengerId").with_columns(
         pl.Series("Survived", predictions, dtype=pl.Int64),
     )
     run_dir = Path(run_dir)
@@ -587,7 +587,7 @@ def save_predictions(artifact, predictions, probabilities, test_dataset, run_dir
         "probabilities_available": probabilities is not None,
         "feature_set": artifact["feature_set"], "feature_columns": artifact["feature_columns"],
         "rows": len(submission), "training_configuration": artifact["configuration"],
-        "test_dataframe_sha256": hashlib.sha256(test_dataset.write_csv().encode()).hexdigest(),
+        "kaggle_test_dataframe_sha256": hashlib.sha256(kaggle_test.write_csv().encode()).hexdigest(),
     }, indent=2))
     return submission
 
@@ -628,10 +628,10 @@ def save_run_state(run_dir, manifest):
 
 
 def print_run_summary(run_dir, metrics):
-    """Print holdout/selection scores and locations of the saved run reports."""
-    if metrics["holdout_accuracy"] is not None:
-        print(f"Holdout accuracy: {metrics['holdout_accuracy']:.4f} "
-              f"({metrics['holdout_rows']} rows; model fitted on {metrics['holdout_fit_rows']} development rows)")
+    """Print test/selection scores and locations of the saved run reports."""
+    if metrics["test_accuracy"] is not None:
+        print(f"Local test accuracy: {metrics['test_accuracy']:.4f} "
+              f"({metrics['test_rows']} rows; model fitted on {metrics['test_train_rows']} train rows)")
     if metrics["final_selection_cv_accuracy"] is not None:
         print(f"Final Optuna selection CV accuracy: {metrics['final_selection_cv_accuracy']:.4f} (selection score)")
     print(f"Report: {run_dir / 'summary.md'}")
@@ -640,16 +640,16 @@ def print_run_summary(run_dir, metrics):
 
 
 def create_evaluation_run(train_dataset, model_specs, results_path, train_i,
-                          holdout_i, outer_splits, *, feature_set, seed, n_trials,
-                          epochs, run_kind, device, tune, development_size,
-                          inner_splits, stopping_size, output_dir=None):
+                          test_i, outer_splits, *, feature_set, seed, n_trials,
+                          epochs, run_kind, device, tune, train_size,
+                          inner_splits, val_size, output_dir=None):
     """Create an evaluation directory and save its protocol and row provenance.
 
     Return (run_dir, manifest). Row indices refer to train_dataset; outer_splits
-    index the development subset. This function records splits without fitting.
+    index the train subset. This function records splits without fitting.
     """
     n_splits = len(outer_splits)
-    y_dev = train_dataset["Survived"].to_numpy()[train_i]
+    y_train = train_dataset["Survived"].to_numpy()[train_i]
     evaluation_kind = "nested" if tune else "fixed"
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%fZ") + f"_{evaluation_kind}_{run_kind}"
     run_dir = Path(output_dir) if output_dir is not None else Path(results_path) / run_id
@@ -660,15 +660,15 @@ def create_evaluation_run(train_dataset, model_specs, results_path, train_i,
         "metric": "accuracy", "score_role": score_role,
         "selection_score_role": "inner_selection_cv" if tune else None,
         "feature_set": feature_set, "seed": seed, "n_trials_per_outer_fold": n_trials if tune else 0,
-        "tuning_enabled": tune, "development_size": development_size,
+        "tuning_enabled": tune, "train_size": train_size,
         "dnn_max_epochs": epochs, "device": device,
-        "protocol": f"stratified_{development_size:g}_{evaluation_kind}_outer{n_splits}_inner{inner_splits if tune else 0}_v1",
+        "protocol": f"stratified_{train_size:g}_{evaluation_kind}_outer{n_splits}_inner{inner_splits if tune else 0}_v1",
         "cv": {"outer_folds": n_splits, "inner_folds": inner_splits if tune else 0, "shuffle": True,
-               "outer_dnn_internal_validation_fraction": stopping_size, "std_ddof": 0},
-        "holdout_role": "previously_viewed_exploratory_holdout",
-        "train_indices": train_i.tolist(), "holdout_indices": holdout_i.tolist(),
+               "outer_dnn_internal_validation_fraction": val_size, "std_ddof": 0},
+        "test_role": "previously_viewed_exploratory_test",
+        "train_indices": train_i.tolist(), "test_indices": test_i.tolist(),
         "train_passenger_ids": train_dataset[train_i]["PassengerId"].to_list(),
-        "holdout_passenger_ids": train_dataset[holdout_i]["PassengerId"].to_list(),
+        "test_passenger_ids": train_dataset[test_i]["PassengerId"].to_list(),
         "dataframe_sha256": hashlib.sha256(train_dataset.write_csv().encode()).hexdigest(),
         "source_sha256": {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
                           for name in ["data.py", "evaluation.py", "features.py", "models.py", "training.py", "utils.py"]},
@@ -677,14 +677,14 @@ def create_evaluation_run(train_dataset, model_specs, results_path, train_i,
         ]},
         "outer_splits": [], "models": list(model_specs),
     }
-    for fold, (fit, val) in enumerate(outer_splits, start=1):
+    for fold, (train, val) in enumerate(outer_splits, start=1):
         inner = (list(StratifiedKFold(n_splits=inner_splits, shuffle=True, random_state=seed + fold)
-                      .split(fit, y_dev[fit])) if tune else [])
+                      .split(train, y_train[train])) if tune else [])
         manifest["outer_splits"].append({
-            "outer_fold": fold, "fit_source_indices": train_i[fit].tolist(),
-            "validation_source_indices": train_i[val].tolist(),
-            "inner_splits": [{"fit_source_indices": train_i[fit[a]].tolist(),
-                              "validation_source_indices": train_i[fit[b]].tolist()} for a, b in inner],
+            "outer_fold": fold, "train_source_indices": train_i[train].tolist(),
+            "val_source_indices": train_i[val].tolist(),
+            "inner_splits": [{"train_source_indices": train_i[train[a]].tolist(),
+                              "val_source_indices": train_i[train[b]].tolist()} for a, b in inner],
         })
     (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
     return run_dir, manifest
@@ -710,29 +710,29 @@ def save_trials(study, path):
     study.trials_dataframe().to_csv(path, index=False)
 
 
-def save_holdout_results(run_dir, config, train_dataset, train_i, holdout_i,
+def save_test_results(run_dir, config, train_dataset, train_i, test_i,
                          predictions, probabilities, accuracy, selection, *, epochs=None):
-    """Save holdout accuracy, predictions and the development-only fit provenance.
+    """Save test accuracy, predictions and the train-only fit provenance.
 
-    train_i/holdout_i index the original dataset. selection contains settings
-    chosen using development rows; optional epochs records the DNN epoch count.
+    train_i/test_i index the original dataset. selection contains settings
+    chosen using train rows; optional epochs records the DNN epoch count.
     """
     run_dir = Path(run_dir)
-    holdout = train_dataset[holdout_i]
-    holdout.select("PassengerId", pl.col("Survived").alias("y_true")).with_columns(
+    test = train_dataset[test_i]
+    test.select("PassengerId", pl.col("Survived").alias("y_true")).with_columns(
         pl.Series("y_pred", predictions, dtype=pl.Int64),
         pl.Series("p_survived", probabilities if probabilities is not None
-                  else [None] * len(holdout), dtype=pl.Float64),
-    ).write_csv(run_dir / "holdout_predictions.csv")
+                  else [None] * len(test), dtype=pl.Float64),
+    ).write_csv(run_dir / "test_predictions.csv")
     report = {
         "model": config.model.name, "metric": "accuracy", "accuracy": accuracy,
-        "score_role": "holdout_accuracy", "fit_rows": len(train_i), "rows": len(holdout_i),
-        "fit_source_indices": train_i.tolist(), "holdout_source_indices": holdout_i.tolist(),
+        "score_role": "test_accuracy", "train_rows": len(train_i), "rows": len(test_i),
+        "train_source_indices": train_i.tolist(), "test_source_indices": test_i.tolist(),
         "selection": {key: selection[key] for key in ["score_role", "accuracy", "best_params"] if key in selection},
     }
     if epochs is not None:
         report["epochs"] = epochs
-    (run_dir / "holdout.json").write_text(json.dumps(report, indent=2))
+    (run_dir / "test.json").write_text(json.dumps(report, indent=2))
 
 
 def save_classical_fold(fitted, run_dir, record):
@@ -744,11 +744,11 @@ def save_classical_fold(fitted, run_dir, record):
                   estimator_params=report["parameters"], ensemble=report["ensemble"])
 
 
-def save_dnn_fold(fitted, model_cls, run_dir, record, *, fit_indices,
-                  stop_indices, study=None):
+def save_dnn_fold(fitted, model_cls, run_dir, record, *, train_indices,
+                  val_indices, study=None):
     """Save a DNN fold and preprocessing and extend its provenance record.
 
-    fit_indices/stop_indices refer to original dataset rows.
+    train_indices/val_indices refer to original dataset rows.
     """
     model_dir = run_dir / record["model"]
     fold, fold_seed = record["outer_fold"], record["seed"]
@@ -772,7 +772,7 @@ def save_dnn_fold(fitted, model_cls, run_dir, record, *, fit_indices,
         best_params=study.best_params if study is not None else {},
         configuration=configuration, checkpoint=str(saved_path.relative_to(run_dir)),
         preprocessing=str(preprocess_path.relative_to(run_dir)),
-        fit_source_indices=fit_indices.tolist(), stop_source_indices=stop_indices.tolist(),
+        train_source_indices=train_indices.tolist(), val_source_indices=val_indices.tolist(),
         best_epoch=fitted["best_epoch"], weights_epoch=fitted["weights_epoch"],
         last_epoch=fitted["last_epoch"], best_val_acc=fitted["best_val_acc"],
         last_val_acc=fitted["last_val_acc"],
@@ -781,15 +781,15 @@ def save_dnn_fold(fitted, model_cls, run_dir, record, *, fit_indices,
 
 
 def record_oof_predictions(oof_rows, record, val, train_i, train_dataset,
-                           y_dev, predictions, probabilities):
+                           y_train, predictions, probabilities):
     """Append one fold's predictions with original passenger and row identities."""
     name, fold = record["model"], record["outer_fold"]
     for position, prediction, probability in zip(val, predictions, probabilities if probabilities is not None
                                                 else [None] * len(val)):
         source = int(train_i[position])
-        oof_rows.append({"model": name, "development_index": int(position), "source_index": source,
+        oof_rows.append({"model": name, "train_index": int(position), "source_index": source,
                          "PassengerId": int(train_dataset[source, "PassengerId"]),
-                         "y_true": int(y_dev[position]), "outer_fold": fold,
+                         "y_true": int(y_train[position]), "outer_fold": fold,
                          "y_pred": int(prediction), "p_survived": float(probability) if probability is not None else None})
 
 
@@ -810,10 +810,10 @@ def save_classical_model(fitted, X, train_dataset, config, run_dir, selection):
     joblib.dump(artifact, model_path)
     # Keep row identities and split indices out of the readable training report.
     selection_splits = {key: selection.pop(key) for key in [
-        "development_indices", "excluded_holdout_indices", "splits",
+        "train_indices", "excluded_test_indices", "splits",
     ] if key in selection}
     (run_dir / "training_splits.json").write_text(json.dumps({
-        "fit_passenger_ids": train_dataset["PassengerId"].to_list(),
+        "train_passenger_ids": train_dataset["PassengerId"].to_list(),
         "selection": selection_splits,
     }, indent=2))
     report = {
@@ -827,11 +827,11 @@ def save_classical_model(fitted, X, train_dataset, config, run_dir, selection):
 
 
 def save_custom_dnn(fitted, selected, X, train_dataset, config, run_dir, selection,
-                    development, holdout, splits, fit, stop):
+                    train_i, test_i, splits, train_indices, val_indices):
     """Save a final DNN, preprocessing and training reports.
 
-    Return the model.pt path. selected supplies the frozen stopping decisions;
-    development/holdout/fit/stop contain original row indices for provenance.
+    Return the model.pt path. selected supplies the frozen validation decisions;
+    train_i/test_i and train_indices/val_indices refer to original dataset rows.
     """
     run_dir = Path(run_dir)
     y = train_dataset["Survived"].to_numpy()
@@ -847,9 +847,9 @@ def save_custom_dnn(fitted, selected, X, train_dataset, config, run_dir, selecti
     torch.save(artifact, model_path)
     joblib.dump(fitted['preprocess'], run_dir/'preprocess.joblib')
     (run_dir/'training_splits.json').write_text(json.dumps({
-        'fit_passenger_ids': train_dataset['PassengerId'].to_list(),
-        'selection': {'development_indices': development.tolist(), 'excluded_holdout_indices': holdout.tolist(),
-                      'splits': splits, 'fit_source_indices': fit.tolist(), 'stop_source_indices': stop.tolist()},
+        'train_passenger_ids': train_dataset['PassengerId'].to_list(),
+        'selection': {'train_indices': train_i.tolist(), 'excluded_test_indices': test_i.tolist(),
+                      'splits': splits, 'train_source_indices': train_indices.tolist(), 'val_source_indices': val_indices.tolist()},
     }, indent=2))
     (run_dir/'training.json').write_text(json.dumps({
         'model': config.model.name, 'fit_role': 'final_refit_all_labeled_rows', 'fitted_rows': len(y),
@@ -857,7 +857,7 @@ def save_custom_dnn(fitted, selected, X, train_dataset, config, run_dir, selecti
         'optimizer': {'name': configuration['optimizer_name'], 'params': configuration['optimizer_params']},
         'scheduler': {'name': configuration['scheduler_name'], 'params': configuration['scheduler_params']},
         'epochs': selected['best_epoch'], 'learning_rates': fitted['learning_rates'],
-        'stopping': {'score_role': 'internal_stopping_accuracy', 'accuracy': selected['best_val_acc']},
+        'validation': {'score_role': 'internal_validation_accuracy', 'accuracy': selected['best_val_acc']},
         'ensemble': {'n_models': 1}, 'probabilities_available': True,
     }, indent=2))
     return model_path

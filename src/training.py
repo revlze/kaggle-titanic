@@ -1,4 +1,4 @@
-"""Train on fit rows, choose weights on internal validation, predict separately."""
+"""Train models, select DNN weights on val, evaluate on test and predict."""
 
 import copy
 from pathlib import Path
@@ -19,6 +19,7 @@ from torch.utils.data import DataLoader, TensorDataset
 import utils
 from data import TitanicData
 from features import make_features
+from models import build_dnn, restore_dnn
 
 
 def tune_classical(estimator, distributions, X, y, cv, *, seed, n_trials):
@@ -42,11 +43,14 @@ def tune_classical(estimator, distributions, X, y, cv, *, seed, n_trials):
     """
     if n_trials < 1:
         raise ValueError("tuning.n_trials must be positive")
+
     study = optuna.create_study(
         direction="maximize", sampler=optuna.samplers.TPESampler(seed=seed),
         pruner=optuna.pruners.NopPruner(),
     )
+
     model = estimator.named_steps["model"]
+
     if isinstance(model, (VotingClassifier, StackingClassifier)):
         # Sample one shared setting, then apply it to every member of the ensemble.
         first_name = model.estimators[0][0]
@@ -78,6 +82,7 @@ def tune_classical(estimator, distributions, X, y, cv, *, seed, n_trials):
         fitted = clone(estimator).set_params(**best_params).fit(X, y)
         return SimpleNamespace(best_estimator_=fitted, best_params_=best_params,
                                best_score_=study.best_value, study_=study)
+
     search = OptunaSearchCV(
         clone(estimator), distributions, cv=cv, scoring="accuracy", n_trials=n_trials,
         n_jobs=1, refit=True, study=study, error_score="raise",
@@ -87,7 +92,7 @@ def tune_classical(estimator, distributions, X, y, cv, *, seed, n_trials):
 
 
 def fit_classical(data: TitanicData, estimator, config, run_dir, distributions=None, *, refit_all=True):
-    """Select parameters on development, score holdout and optionally refit all rows.
+    """Select parameters on train, score test and optionally refit all rows.
 
     Args:
         data: Shared TitanicData instance with the same split used by CV.
@@ -95,63 +100,76 @@ def fit_classical(data: TitanicData, estimator, config, run_dir, distributions=N
         config: Feature, validation and tuning settings.
         run_dir: Existing directory for the model and training reports.
         distributions: Optuna parameter distributions when tuning is enabled.
-        refit_all: Fit and save the final full-data model after holdout evaluation.
+        refit_all: Fit and save the final full-data model after test evaluation.
 
     Returns:
         Path to model.joblib, containing the fitted pipeline, feature columns
         and training configuration, or None when refit_all is False.
-        Holdout scores and predictions are saved before the optional final refit.
+        Test scores and predictions are saved before the optional final refit.
 
     With tuning disabled, use the configured parameters directly. The final
-    refit includes the holdout rows after selection and holdout evaluation.
+    refit includes the test rows after selection and test evaluation.
     """
     run_dir = Path(run_dir)
     train_dataset = data.train_dataset
     X, y = data.X, data.y
-    X_dev, y_dev = data.X_dev, data.y_dev
-    X_holdout, y_holdout = data.X_holdout, data.y_holdout
-    train_i, holdout_i = data.train_i, data.holdout_i
+    X_train, y_train = data.X_train, data.y_train
+    X_test, y_test = data.X_test, data.y_test
+    train_i, test_i = data.train_i, data.test_i
+
     best_params = {}
     selection = {"score_role": "fixed_parameters", "accuracy": None}
+
     if config.tuning.enabled:
         inner = list(StratifiedKFold(
             n_splits=config.validation.inner_splits, shuffle=True, random_state=config.base.seed,
-        ).split(X_dev, y_dev))
+        ).split(X_train, y_train))
+
         search = tune_classical(
-            estimator, distributions, X_dev, y_dev, inner,
+            estimator, distributions, X_train, y_train, inner,
             seed=config.base.seed, n_trials=config.tuning.n_trials,
         )
+
         best_params = search.best_params_
-        holdout_model = search.best_estimator_
+        fitted = search.best_estimator_
+
         utils.save_trials(search.study_, run_dir / "final_trials.csv")
+
         selection = {
-            "score_role": "development_selection_cv", "accuracy": float(search.best_score_),
-            "best_params": best_params, "development_indices": train_i.tolist(),
-            "excluded_holdout_indices": holdout_i.tolist(),
-            "splits": [{"fit_source_indices": train_i[a].tolist(),
-                        "validation_source_indices": train_i[b].tolist()} for a, b in inner],
+            "score_role": "train_selection_cv", "accuracy": float(search.best_score_),
+            "best_params": best_params, "train_indices": train_i.tolist(),
+            "excluded_test_indices": test_i.tolist(),
+            "splits": [{"train_source_indices": train_i[a].tolist(),
+                        "val_source_indices": train_i[b].tolist()} for a, b in inner],
         }
+
     else:
-        holdout_model = clone(estimator).fit(X_dev, y_dev)
-    predictions, probabilities = utils.predict_classifier(holdout_model, X_holdout)
-    holdout_accuracy = float(accuracy_score(y_holdout, predictions))
-    utils.save_holdout_results(
-        run_dir, config, train_dataset, train_i, holdout_i,
-        predictions, probabilities, holdout_accuracy, selection,
+        fitted = clone(estimator).fit(X_train, y_train)
+
+    predictions, probabilities = utils.predict_classifier(fitted, X_test)
+    test_accuracy = float(accuracy_score(y_test, predictions))
+
+    utils.save_test_results(
+        run_dir, config, train_dataset, train_i, test_i,
+        predictions, probabilities, test_accuracy, selection,
     )
+
+    # return none if refit on full train_dataset is not needed
     if not refit_all:
         return None
+
     # Do not reuse a fitted outer model or select parameters by outer accuracy.
     fitted = clone(estimator).set_params(**best_params)
     fitted.fit(X, y)
+
     return utils.save_classical_model(fitted, X, train_dataset, config, run_dir, selection)
 
-def predict_classical(model_path, test_dataset, run_dir):
-    """Load a saved classical pipeline and write predictions in test row order.
+def predict_classical(model_path, kaggle_test, run_dir):
+    """Load a classical pipeline and predict in Kaggle test row order.
 
     Args:
         model_path: Path to a model.joblib artifact from fit_classical.
-        test_dataset: Raw passenger DataFrame for inference.
+        kaggle_test: Raw passenger DataFrame for inference.
         run_dir: Existing directory for submission, predictions and provenance.
 
     Returns:
@@ -159,34 +177,37 @@ def predict_classical(model_path, test_dataset, run_dir):
         Feature extraction follows the artifact; fitted preprocessing is reused.
     """
     artifact = joblib.load(model_path)
-    X, _, _ = make_features(test_dataset, artifact["feature_set"])
+    X, _, _ = make_features(kaggle_test, artifact["feature_set"])
+
     if X.columns != artifact["feature_columns"]:
         raise ValueError("Inference features differ from the saved training columns")
+
     model = artifact["pipeline"]
     predictions, probabilities = utils.predict_classifier(model, X)
-    return utils.save_predictions(artifact, predictions, probabilities, test_dataset, run_dir, model_path,
+
+    return utils.save_predictions(artifact, predictions, probabilities, kaggle_test, run_dir, model_path,
                             utils.get_model_report(model.named_steps["model"])["ensemble"])
 
 
-def tune_dnn(spec, X, y, cv, *, seed, n_trials, epochs, device="cpu", batch_size=64, stopping_size=0.2):
-    """Tune a DNN using CV accuracy with separate internal stopping subsets.
+def tune_dnn(spec, X, y, cv, *, seed, n_trials, epochs, device="cpu", batch_size=64, val_size=0.2):
+    """Tune a DNN using CV accuracy with separate internal validation subsets.
 
     Args:
         spec: Model class/name, preprocessing and suggest_params trial sampler.
         X: Features available to this parameter search.
         y: Target labels aligned with X.
         cv: Inner fit/validation index pairs relative to X and y.
-        seed: Seed for the sampler and internal stopping splits.
+        seed: Seed for the sampler and internal validation splits.
         n_trials: Number of configurations to evaluate.
         epochs: Training epoch budget for each fold.
         device: PyTorch execution device.
         batch_size: Requested training batch size.
-        stopping_size: Fraction of each inner training fold reserved for stopping.
+        val_size: Fraction of each inner training fold reserved for validation.
 
     Returns:
         An Optuna study whose trials record configuration, inner fold scores
         and selected epochs. Inner validation labels only score predictions;
-        preprocessing and epoch selection use each inner fold's fit/stop rows.
+        preprocessing and epoch selection use each inner fold's train/val rows.
     """
     study = optuna.create_study(direction='maximize', sampler=optuna.samplers.TPESampler(seed=seed),
                                 pruner=optuna.pruners.NopPruner())
@@ -196,19 +217,20 @@ def tune_dnn(spec, X, y, cv, *, seed, n_trials, epochs, device="cpu", batch_size
         configuration = spec['suggest_params'](trial)
         trial.set_user_attr('configuration', configuration)
         scores, best_epochs = [], []
-        for fold, (fit, val) in enumerate(cv, 1):
-            X_train, X_stop, y_train, y_stop = train_test_split(
-                X[fit], y[fit], test_size=stopping_size,
-                stratify=y[fit], random_state=seed + fold,
+        for fold, (train, val) in enumerate(cv, 1):
+            X_train, X_val, y_train, y_val = train_test_split(
+                X[train], y[train], test_size=val_size,
+                stratify=y[train], random_state=seed + fold,
             )
             fitted = fit_dnn(spec['model_cls'], configuration, spec['preprocess'],
-                             X_train, y_train, X_stop, y_stop, seed=seed + fold, epochs=epochs,
+                             X_train, y_train, X_val, y_val, seed=seed + fold, epochs=epochs,
                              embedding_columns=spec.get('embedding_columns'), device=device, batch_size=batch_size)
             predictions, _ = predict_dnn(fitted['model'], fitted['preprocess'], X[val], device)
             scores.append(float(accuracy_score(y[val], predictions)))
             best_epochs.append(fitted['best_epoch'])
         trial.set_user_attr('inner_fold_scores', scores)
         trial.set_user_attr('inner_best_epochs', best_epochs)
+
         return float(np.mean(scores))
 
     study.optimize(objective, n_trials=n_trials)
@@ -216,83 +238,96 @@ def tune_dnn(spec, X, y, cv, *, seed, n_trials, epochs, device="cpu", batch_size
 
 
 def fit_custom_dnn(data: TitanicData, spec, config, run_dir, *, refit_all=True):
-    """Select DNN settings/epochs, evaluate holdout and optionally refit all rows.
+    """Select DNN settings/epochs, evaluate test and optionally refit all rows.
 
     Args:
         data: Shared TitanicData instance with the same split used by CV.
         spec: Custom-DNN specification from utils.get_dnn_spec.
         config: Feature, validation, tuning and training settings.
         run_dir: Existing directory for model.pt, preprocessing and training reports.
-        refit_all: Fit and save the final full-data model after holdout evaluation.
+        refit_all: Fit and save the final full-data model after test evaluation.
 
     Returns:
         Path to model.pt. The companion preprocess.joblib stores the fitted
         transformer required for inference. Return None when refit_all is False.
 
-    An internal development split selects the epoch count and learning-rate
-    schedule. Fresh development and full-data fits replay both without validation;
-    the holdout is scored by the development-only model.
+    An internal train split selects the epoch count and learning-rate
+    schedule. Fresh train and full-data fits replay both without validation;
+    the test is scored by the train-only model.
     """
     run_dir = Path(run_dir)
     train_dataset = data.train_dataset
     X, y = data.X, data.y
-    X_dev, y_dev = data.X_dev, data.y_dev
-    X_holdout, y_holdout = data.X_holdout, data.y_holdout
-    development, holdout = data.train_i, data.holdout_i
+    X_test, y_test = data.X_test, data.y_test
+    train_i, test_i = data.train_i, data.test_i
+
     device, epochs, batch_size = config.training.device, config.training.epochs, config.training.batch_size
-    stopping_size = OmegaConf.select(config, 'validation.stopping_size', default=0.2)
+    val_size = OmegaConf.select(config, 'validation.val_size', default=0.2)
     configuration = spec['configuration']
+
     selection = {'score_role': 'fixed_parameters', 'accuracy': None}
     splits = []
+
     if config.tuning.enabled:
         cv = list(StratifiedKFold(n_splits=config.validation.inner_splits, shuffle=True,
-                                  random_state=config.base.seed).split(X_dev, y_dev))
-        study = tune_dnn(spec, X_dev, y_dev, cv, seed=config.base.seed,
+                                  random_state=config.base.seed).split(data.X_train, data.y_train))
+        study = tune_dnn(spec, data.X_train, data.y_train, cv, seed=config.base.seed,
                          n_trials=config.tuning.n_trials, epochs=epochs, device=device,
-                         batch_size=batch_size, stopping_size=stopping_size)
+                         batch_size=batch_size, val_size=val_size)
+
         configuration = study.best_trial.user_attrs['configuration']
+
         utils.save_trials(study, run_dir/'final_trials.csv')
-        selection = {'score_role': 'development_selection_cv', 'accuracy': float(study.best_value),
+
+        selection = {'score_role': 'train_selection_cv', 'accuracy': float(study.best_value),
                      'best_params': study.best_params}
-        splits = [{'fit_source_indices': development[a].tolist(),
-                   'validation_source_indices': development[b].tolist()} for a, b in cv]
-    X_fit, X_stop, y_fit, y_stop, fit, stop = train_test_split(
-        X_dev, y_dev, development, test_size=stopping_size,
-        stratify=y_dev, random_state=config.base.seed,
+        splits = [{'train_source_indices': train_i[a].tolist(),
+                   'val_source_indices': train_i[b].tolist()} for a, b in cv]
+
+    X_train, X_val, y_train, y_val, train_indices, val_indices = train_test_split(
+        data.X_train, data.y_train, train_i, test_size=val_size,
+        stratify=data.y_train, random_state=config.base.seed,
     )
-    selected = fit_dnn(spec['model_cls'], configuration, spec['preprocess'], X_fit, y_fit, X_stop, y_stop,
+
+    selected = fit_dnn(spec['model_cls'], configuration, spec['preprocess'], X_train, y_train, X_val, y_val,
                        seed=config.base.seed, epochs=epochs, embedding_columns=spec.get('embedding_columns'),
                        device=device, batch_size=batch_size)
-    holdout_model = fit_dnn(
-        spec['model_cls'], configuration, spec['preprocess'], X_dev, y_dev, None, None,
+
+    fitted = fit_dnn(
+        spec['model_cls'], configuration, spec['preprocess'], data.X_train, data.y_train, None, None,
         seed=config.base.seed, epochs=selected['best_epoch'],
         embedding_columns=spec.get('embedding_columns'), device=device, batch_size=batch_size,
         learning_rates=selected['learning_rates'][:selected['best_epoch']],
     )
-    predictions, probabilities = predict_dnn(holdout_model['model'], holdout_model['preprocess'], X_holdout, device)
-    holdout_accuracy = float(accuracy_score(y_holdout, predictions))
-    utils.save_holdout_results(
-        run_dir, config, train_dataset, development, holdout,
-        predictions, probabilities, holdout_accuracy, selection, epochs=selected['best_epoch'],
+
+    predictions, probabilities = predict_dnn(fitted['model'], fitted['preprocess'], X_test, device)
+    test_accuracy = float(accuracy_score(y_test, predictions))
+
+    utils.save_test_results(
+        run_dir, config, train_dataset, train_i, test_i,
+        predictions, probabilities, test_accuracy, selection, epochs=selected['best_epoch'],
     )
+
     if not refit_all:
         return None
+
     # Freeze both epoch count and scheduler decisions before adding any other labels.
     fitted = fit_dnn(spec['model_cls'], configuration, spec['preprocess'], X, y, None, None,
                      seed=config.base.seed, epochs=selected['best_epoch'],
                      embedding_columns=spec.get('embedding_columns'), device=device, batch_size=batch_size,
                      learning_rates=selected['learning_rates'][:selected['best_epoch']])
+
     return utils.save_custom_dnn(
         fitted, selected, X, train_dataset, config, run_dir, selection,
-        development, holdout, splits, fit, stop,
+        train_i, test_i, splits, train_indices, val_indices,
     )
 
-def predict_custom_dnn(model_path, test_dataset, run_dir, device='cpu'):
-    """Restore a custom DNN and its preprocessing and write test predictions.
+def predict_custom_dnn(model_path, kaggle_test, run_dir, device='cpu'):
+    """Restore a custom DNN and its preprocessing and write Kaggle predictions.
 
     Args:
         model_path: Path to model.pt with its companion preprocessing artifact.
-        test_dataset: Raw passenger DataFrame whose feature columns must match training.
+        kaggle_test: Raw passenger DataFrame whose feature columns must match training.
         run_dir: Existing directory for submission, probabilities and provenance.
         device: PyTorch device used for inference.
 
@@ -300,14 +335,18 @@ def predict_custom_dnn(model_path, test_dataset, run_dir, device='cpu'):
         A Polars DataFrame with PassengerId and predicted Survived labels.
     """
     artifact = torch.load(model_path, map_location='cpu', weights_only=True)
-    X, _, _ = make_features(test_dataset, artifact['feature_set'])
+    X, _, _ = make_features(kaggle_test, artifact['feature_set'])
+
     if X.columns != artifact['feature_columns']:
         raise ValueError('Inference features differ from the saved training columns')
+
     model = restore_dnn(artifact['model_name'], artifact['model_params'], artifact['embedding_metadata'])
     model.load_state_dict(artifact['model_state_dict'])
+
     preprocessing = joblib.load(Path(model_path).parent/artifact['preprocess_path'])
     predictions, probabilities = predict_dnn(model, preprocessing, X, device)
-    return utils.save_predictions(artifact, predictions, probabilities, test_dataset, run_dir, model_path, {'n_models': 1})
+
+    return utils.save_predictions(artifact, predictions, probabilities, kaggle_test, run_dir, model_path, {'n_models': 1})
 
 
 def predict_loader(model, loss_model, loader, device="cpu"):
@@ -324,15 +363,20 @@ def predict_loader(model, loss_model, loader, device="cpu"):
         using sigmoid probabilities thresholded at 0.5.
     """
     model.eval()
+
     loss_sum, probabilities, targets = 0.0, [], []
     with torch.no_grad():
         for x, target in loader:
             logits = model(x.to(device))
             loss_sum += loss_model(logits, target.to(device)).item() * len(x)
+
             probabilities.extend(torch.sigmoid(logits).cpu().numpy().ravel())
+
             targets.extend(target.numpy().ravel())
+
     probabilities = np.asarray(probabilities)
     predictions = (probabilities >= 0.5).astype(int)
+
     return loss_sum / len(targets), accuracy_score(targets, predictions)
 
 
@@ -345,7 +389,7 @@ def train_epochs(model, loss_model, opt, train_loader, val_loader, sched=None,
         loss_model: Loss function accepting logits and binary targets.
         opt: Optimizer bound to the model's parameters.
         train_loader: Batches used for gradient updates.
-        val_loader: Internal stopping loader, or None for a final fixed-epoch refit.
+        val_loader: Internal validation loader, or None for a final fixed-epoch refit.
         sched: Optional scheduler stepped after internal validation.
         epoches: Number of training epochs, preserving the existing argument name.
         trial: Optional Optuna trial for epoch reporting and pruning.
@@ -358,11 +402,13 @@ def train_epochs(model, loss_model, opt, train_loader, val_loader, sched=None,
         restore the earliest weights achieving the highest validation accuracy.
         Without validation, retain the final weights and leave accuracy unset.
 
-    val_loader must contain internal stopping rows, not an outer evaluation fold.
+    val_loader must contain internal validation rows, not an outer evaluation fold.
     """
     model.to(device)
+
     history = {name: [] for name in ["train_loss", "train_acc", "val_loss", "val_acc"]}
     best_accuracy, best_state, best_epoch = -1.0, None, None
+
     used_learning_rates = []
     for epoch in range(1, epoches + 1):
         if learning_rates is not None:
@@ -427,74 +473,18 @@ def train_epochs(model, loss_model, opt, train_loader, val_loader, sched=None,
     }
 
 
-def build_dnn(model_cls, model_params, preprocessing, input_dim, embedding_columns=None):
-    """Infer input sizes from fitted preprocessing and instantiate a fresh DNN.
-
-    Args:
-        model_cls: PyTorch module class or configured model name.
-        model_params: Architecture settings; inp is inferred here.
-        preprocessing: Fitted ColumnTransformer with output slices and categories.
-        input_dim: Width of its transformed feature matrix.
-        embedding_columns: Ordered category names used for embedding width settings.
-
-    Returns:
-        (model, params, embedding_metadata): The new model, resolved constructor
-        parameters and optional numeric/category slices and vocabulary sizes.
-        Embedding vocabularies reserve one extra slot for unknown categories.
-    """
-    params = model_params.copy()
-    params["inp"] = input_dim
-    embedding_metadata = None
-    if embedding_columns:
-        numeric = preprocessing.output_indices_["numeric"]
-        categorical = preprocessing.output_indices_["categorical"]
-        sizes = [len(c) + 1 for c in preprocessing.named_transformers_["categorical"].named_steps["encoder"].categories_]
-        params["inp"] = numeric.stop - numeric.start + sum(
-            params.get(f"{column}_emb_dim", 2) for column in embedding_columns
-        )
-        embedding_metadata = {
-            "num_slice": [numeric.start, numeric.stop],
-            "cat_slice": [categorical.start, categorical.stop],
-            "cat_sizes": sizes,
-        }
-    return restore_dnn(model_cls, params, embedding_metadata), params, embedding_metadata
-
-
-def restore_dnn(model_cls, model_params, embedding_metadata=None):
-    """Instantiate a DNN architecture from constructor and embedding metadata.
-
-    Args:
-        model_cls: PyTorch module class or configured model name.
-        model_params: Saved constructor parameters, including inferred input size.
-        embedding_metadata: Optional serialized slices and category vocabulary sizes.
-
-    Returns:
-        A newly initialized module. The caller loads checkpoint weights into it.
-    """
-    params = model_params.copy()
-    if embedding_metadata:
-        params.update({
-            "num_slice": slice(*embedding_metadata["num_slice"]),
-            "cat_slice": slice(*embedding_metadata["cat_slice"]),
-            "cat_sizes": embedding_metadata["cat_sizes"],
-        })
-    if isinstance(model_cls, str):
-        return utils.get_model(OmegaConf.create({'model': {'name': model_cls, 'params': {}}}), **params)
-    return model_cls(**params)
-
-
-def fit_dnn(model_cls, configuration, preprocessing, X_fit, y_fit, X_stop, y_stop,
+def fit_dnn(model_cls, configuration, preprocessing, X_train, y_train, X_val, y_val,
             seed, epochs=15, embedding_columns=None, device="cpu", batch_size=64, learning_rates=None):
-    """Fit preprocessing and a fresh DNN using fit and optional internal stopping rows.
+    """Fit preprocessing and a fresh DNN using train and optional val rows.
 
     Args:
         model_cls: PyTorch module class or configured model name.
         configuration: Model, loss, optimizer and scheduler settings.
-        preprocessing: Unfitted transformer cloned and fitted only on X_fit.
-        X_fit: Features used to learn preprocessing and model weights.
-        y_fit: Binary labels aligned with X_fit.
-        X_stop: Internal stopping features, or None for a fixed-epoch refit.
-        y_stop: Binary labels for X_stop, or None when stopping is disabled.
+        preprocessing: Unfitted transformer cloned and fitted only on X_train.
+        X_train: Features used to learn preprocessing and model weights.
+        y_train: Binary labels aligned with X_train.
+        X_val: Internal validation features, or None for a fixed-epoch refit.
+        y_val: Binary labels for X_val, or None when validation is disabled.
         seed: Seed for initialization, shuffled batches and supported operations.
         epochs: Positive training epoch budget.
         embedding_columns: Optional ordered names of embedded categorical features.
@@ -508,24 +498,32 @@ def fit_dnn(model_cls, configuration, preprocessing, X_fit, y_fit, X_stop, y_sto
         with the caller and is never passed to this training function.
     """
     utils.set_seed(seed)
+
     fitted_preprocess = clone(preprocessing)
-    x_fit = torch.as_tensor(fitted_preprocess.fit_transform(X_fit), dtype=torch.float32)
-    targets_fit = torch.as_tensor(np.array(y_fit, copy=True).reshape(-1, 1), dtype=torch.float32)
+
+    x_train = torch.as_tensor(fitted_preprocess.fit_transform(X_train), dtype=torch.float32)
+
+    targets_train = torch.as_tensor(np.array(y_train, copy=True).reshape(-1, 1), dtype=torch.float32)
+
     if epochs < 1 or batch_size < 1:
         raise ValueError('training.epochs and training.batch_size must be positive')
+
     # Merge a singleton tail into a larger batch for BatchNorm-based architectures.
-    while batch_size > 1 and len(x_fit) % batch_size == 1:
+    while batch_size > 1 and len(x_train) % batch_size == 1:
         batch_size += 1
-    train_loader = DataLoader(TensorDataset(x_fit, targets_fit), batch_size=batch_size, shuffle=True,
+
+    train_loader = DataLoader(TensorDataset(x_train, targets_train), batch_size=batch_size, shuffle=True,
                               generator=torch.Generator().manual_seed(seed))
-    stop_loader = None
-    if X_stop is not None:
-        x_stop = torch.as_tensor(fitted_preprocess.transform(X_stop), dtype=torch.float32)
-        targets_stop = torch.as_tensor(np.array(y_stop, copy=True).reshape(-1, 1), dtype=torch.float32)
-        stop_loader = DataLoader(TensorDataset(x_stop, targets_stop), batch_size=batch_size)
+    val_loader = None
+    if X_val is not None:
+        x_val = torch.as_tensor(fitted_preprocess.transform(X_val), dtype=torch.float32)
+        targets_val = torch.as_tensor(np.array(y_val, copy=True).reshape(-1, 1), dtype=torch.float32)
+        val_loader = DataLoader(TensorDataset(x_val, targets_val), batch_size=batch_size)
+
     model, params, embedding_metadata = build_dnn(
-        model_cls, configuration["model_params"], fitted_preprocess, x_fit.shape[1], embedding_columns,
+        model_cls, configuration["model_params"], fitted_preprocess, x_train.shape[1], embedding_columns,
     )
+
     # Preserve the notebook trial format, using the shared YAML-style getters.
     config = OmegaConf.create({
         "loss": {"name": configuration.get("loss_name", "BCEWithLogitsLoss"),
@@ -535,13 +533,16 @@ def fit_dnn(model_cls, configuration, preprocessing, X_fit, y_fit, X_stop, y_sto
         "scheduler": {"name": configuration.get("scheduler_name"),
                       "params": configuration.get("scheduler_params", {})},
     })
+
     optimizer = utils.get_optimizer(config, model)
-    scheduler = utils.get_scheduler(config, optimizer) if stop_loader is not None else None
+    scheduler = utils.get_scheduler(config, optimizer) if val_loader is not None else None
     loss_model = utils.get_loss(config)
-    result = train_epochs(model, loss_model, optimizer, train_loader, stop_loader,
+
+    result = train_epochs(model, loss_model, optimizer, train_loader, val_loader,
                           scheduler, epoches=epochs, device=device, learning_rates=learning_rates)
     result.update(preprocess=fitted_preprocess, model_params=params,
                   embedding_metadata=embedding_metadata, configuration=configuration)
+
     return result
 
 

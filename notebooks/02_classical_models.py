@@ -18,9 +18,9 @@ def _(mo):
 
     Сравниваем модели при одном наборе признаков. `FEATURE_SET='base'`
     соответствует семи исходным признакам. Primary metric — accuracy.
-    Сначала фиксируем stratified holdout 20%. На оставшихся 80% baseline
+    Сначала фиксируем stratified test 20%. На оставшихся 80% baseline
     использует 5-fold CV, а Optuna — nested CV 5×3. Preprocessing обучается
-    внутри каждого fit; ранее просмотренный holdout не оценивается.
+    внутри каждого fit; ранее просмотренный test не оценивается.
 
     Для запуска baseline включи `RUN_MODELS`. Подбор включается отдельно
     через `OPTUNA_SEARCH`; `N_TRIALS` задаёт бюджет на модель. Открытие
@@ -149,8 +149,8 @@ def _(mo):
 @app.cell
 def _(data_path, pl):
     train_dataset = pl.read_csv(data_path / "train.csv")
-    test_dataset = pl.read_csv(data_path / "test.csv")
-    return test_dataset, train_dataset
+    kaggle_test = pl.read_csv(data_path / "test.csv")
+    return kaggle_test, train_dataset
 
 
 @app.cell
@@ -167,24 +167,24 @@ def _(
     make_features,
     make_preprocess,
     np,
-    test_dataset,
+    kaggle_test,
     train_dataset,
     train_test_split,
 ):
     X, numeric_columns, categorical_columns = make_features(train_dataset, FEATURE_SET)
-    X_test, _, _ = make_features(test_dataset, FEATURE_SET)
+    X_kaggle_test, _, _ = make_features(kaggle_test, FEATURE_SET)
     y = train_dataset["Survived"]
-    train_i, val_i = train_test_split(
+    train_i, test_i = train_test_split(
         np.arange(len(X)),
         train_size=0.8,
         stratify=y,
         random_state=SEED,
     )
-    X_train, X_val = X[train_i], X[val_i]
-    y_train, y_val = y[train_i], y[val_i]
+    X_train, X_test = X[train_i], X[test_i]
+    y_train, y_test = y[train_i], y[test_i]
     preprocess = make_preprocess(numeric_columns, categorical_columns)
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=SEED)
-    return X_train, X_val, cv, preprocess, train_i, val_i, y_train, y_val
+    return X_train, X_test, cv, preprocess, train_i, test_i, y_train, y_test
 
 
 @app.cell
@@ -233,7 +233,7 @@ def _(accuracy_score, clone, np, pl, tqdm):
 
         return result
 
-    def start_fits(models, params, cv, X_train, y_train, X_val, y_val):
+    def start_fits(models, params, cv, X_train, y_train, X_test, y_test):
         results = []
 
         for model_name, model in models.items():
@@ -242,7 +242,7 @@ def _(accuracy_score, clone, np, pl, tqdm):
                 model.set_params(**params[model_name])
             result = fit_single_model(model_name, model, cv, X_train, y_train)
 
-            # No repeated evaluation on the previously viewed 20% holdout.
+            # No repeated evaluation on the previously viewed 20% test.
             result["score_role"] = "exploratory_fixed_configuration_cv"
 
             results.append(result)
@@ -272,7 +272,7 @@ def _(
     results_path,
     train_dataset,
     train_i,
-    val_i,
+    test_i,
 ):
     def save_experiments(
         results,
@@ -301,9 +301,9 @@ def _(
             "score_role": score_role,
             "protocol": "stratified_80_20_then_5fold_shuffle_v1",
             "train_indices": train_i.tolist(),
-            "holdout_indices": val_i.tolist(),
+            "test_indices": test_i.tolist(),
             "train_passenger_ids": train_dataset[train_i]["PassengerId"].to_list(),
-            "holdout_passenger_ids": train_dataset[val_i]["PassengerId"].to_list(),
+            "test_passenger_ids": train_dataset[test_i]["PassengerId"].to_list(),
             "train_sha256": hashlib.sha256(
                 (data_path / "train.csv").read_bytes()
             ).hexdigest(),
@@ -602,10 +602,10 @@ def _(
 
 
 @app.cell
-def _(RUN_MODELS, X_train, X_val, cv, models_ens, start_fits, y_train, y_val):
+def _(RUN_MODELS, X_train, X_test, cv, models_ens, start_fits, y_train, y_test):
     res_ens = None
     if RUN_MODELS:
-        res_ens = start_fits(models_ens, None, cv, X_train, y_train, X_val, y_val)
+        res_ens = start_fits(models_ens, None, cv, X_train, y_train, X_test, y_test)
     res_ens
     return (res_ens,)
 
@@ -650,17 +650,17 @@ def _(
 def _(
     RUN_MODELS,
     X_train,
-    X_val,
+    X_test,
     cv,
     models,
     save_experiments,
     start_fits,
     y_train,
-    y_val,
+    y_test,
 ):
     results_default = None
     if RUN_MODELS:
-        results_default = start_fits(models, None, cv, X_train, y_train, X_val, y_val)
+        results_default = start_fits(models, None, cv, X_train, y_train, X_test, y_test)
         save_experiments(
             results_default,
             "classical_default",
@@ -683,7 +683,7 @@ def _(mo):
     внешних фолдов. `inner_selection_accuracy` — оценка подбора;
     `outer_accuracy_mean` — внешняя оценка всей процедуры. Preprocessing
     обучается заново внутри каждого fit. Разделение 80/20 сохранено,
-    ранее просмотренный holdout не оценивается. Полный подбор выключен
+    ранее просмотренный test не оценивается. Полный подбор выключен
     по умолчанию; контролируемое сравнение с MLP находится в 05.
     """)
     return
@@ -1032,16 +1032,16 @@ def _(pl):
 def _(mo):
     mo.md(r"""
     По сохранённому снимку default-дерево имело train accuracy 0.9975,
-    CV 0.8203 и holdout 0.8156: большой разрыв указывает на переобучение.
+    CV 0.8203 и test 0.8156: большой разрыв указывает на переобучение.
     После подбора train снизился до 0.8838, CV составил 0.8259,
-    holdout остался 0.8156. На этом holdout улучшения нет.
+    test остался 0.8156. На этом test улучшения нет.
 
-    У KNN записаны default CV 0.8062 / holdout 0.8324 и tuned CV
-    0.8357 / holdout 0.8380. Tuned CV участвовал в выборе параметров;
-    разница holdout соответствует примерно одному пассажиру из 179.
+    У KNN записаны default CV 0.8062 / test 0.8324 и tuned CV
+    0.8357 / test 0.8380. Tuned CV участвовал в выборе параметров;
+    разница test соответствует примерно одному пассажиру из 179.
 
     Среди записанных tuned-бустингов GradientBoosting имеет CV 0.8582,
-    но holdout 0.8268; у CatBoost CV 0.8483 и holdout 0.8436. Ранжирование
+    но test 0.8268; у CatBoost CV 0.8483 и test 0.8436. Ранжирование
     зависит от разбиения. Эти наблюдения не устанавливают лучшую модель.
 
     После новых запусков сравнивай одинаковый `FEATURE_SET`, протокол,

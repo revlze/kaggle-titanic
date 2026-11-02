@@ -23,8 +23,8 @@ def _(mo):
     `RUN_DNN` включает обычное сравнение, `RUN_ABLATIONS` — выбранные
     отдельные проверки, `OPTUNA_SEARCH` — два поиска. По умолчанию они
     выключены. `USE_CV=False` использует внутреннее разбиение тренировочных
-    80%, `USE_CV=True` — 5 внешних фолдов с отдельным stopping split внутри
-    каждого outer train. Исходный 20% holdout не управляет обучением.
+    80%, `USE_CV=True` — 5 внешних фолдов с отдельным val split внутри
+    каждого outer train. Исходный 20% test не управляет обучением.
     Optuna всегда использует nested CV 5×3. Существующие большие MLP и
     embeddings здесь исследуются на `all`; единое сравнение малой MLP и
     классики на `base_title_family` находится в 05. Метрика — accuracy.
@@ -143,8 +143,8 @@ def _(RUN_ID, mo):
 @app.cell
 def _(data_path, pl):
     train_dataset = pl.read_csv(data_path / 'train.csv')
-    test_dataset = pl.read_csv(data_path / 'test.csv')
-    return test_dataset, train_dataset
+    kaggle_test = pl.read_csv(data_path / 'test.csv')
+    return kaggle_test, train_dataset
 
 
 @app.cell
@@ -164,42 +164,42 @@ def _(
     make_features,
     make_preprocess,
     np,
-    test_dataset,
+    kaggle_test,
     train_dataset,
     train_test_split,
 ):
     X, numeric_columns, categorical_columns = make_features(train_dataset)
-    X_test, _, _ = make_features(test_dataset)
+    X_kaggle_test, _, _ = make_features(kaggle_test)
     y = train_dataset['Survived']
-    train_i, val_i = train_test_split(
+    train_i, test_i = train_test_split(
         np.arange(len(X)), train_size=0.8, stratify=y, random_state=SEED,
     )
-    X_train, X_val = X[train_i], X[val_i]
-    y_train, y_val = y[train_i], y[val_i]
+    X_train_cv, X_test = X[train_i], X[test_i]
+    y_train_cv, y_test = y[train_i], y[test_i]
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=SEED)
-    fit_i, stop_i = train_test_split(
-        np.arange(len(X_train)), test_size=0.2, stratify=y_train, random_state=SEED,
+    train_nn_i, val_i = train_test_split(
+        np.arange(len(X_train_cv)), test_size=0.2, stratify=y_train_cv, random_state=SEED,
     )
-    X_fit, X_stop = X_train[fit_i], X_train[stop_i]
-    y_fit, y_stop = y_train[fit_i], y_train[stop_i]
+    X_train, X_val = X_train_cv[train_nn_i], X_train_cv[val_i]
+    y_train, y_val = y_train_cv[train_nn_i], y_train_cv[val_i]
     preprocess = make_preprocess(numeric_columns, categorical_columns)
     return (
+        X_train_cv,
+        X_test,
         X_train,
         X_val,
-        X_fit,
-        X_stop,
-        y_fit,
-        y_stop,
-        fit_i,
-        stop_i,
+        y_train,
+        y_val,
+        train_nn_i,
+        val_i,
         categorical_columns,
         cv,
         numeric_columns,
         preprocess,
         train_i,
-        val_i,
-        y_train,
-        y_val,
+        test_i,
+        y_train_cv,
+        y_test,
     )
 
 
@@ -216,7 +216,7 @@ def _(
     results_path,
     train_dataset,
     train_i,
-    val_i,
+    test_i,
 ):
     def save_experiments(results, name, parameters=None,
                          score_role='fixed_configuration_cv', extra=None):
@@ -231,11 +231,11 @@ def _(
         record = {
             'run_id': path.stem, 'session_id': RUN_ID, 'name': name, 'feature_set': 'all',
             'seed': SEED, 'metric': 'accuracy', 'score_role': score_role,
-            'protocol': ('stratified_80_20_outer5_internal_stop_v2' if USE_CV
-                         else 'stratified_80_20_development_internal_stop_v2'),
-            'train_indices': train_i.tolist(), 'holdout_indices': val_i.tolist(),
+            'protocol': ('stratified_80_20_outer5_internal_val_v2' if USE_CV
+                         else 'stratified_80_20_train_internal_val_v2'),
+            'train_indices': train_i.tolist(), 'test_indices': test_i.tolist(),
             'train_passenger_ids': train_dataset[train_i]['PassengerId'].to_list(),
-            'holdout_passenger_ids': train_dataset[val_i]['PassengerId'].to_list(),
+            'test_passenger_ids': train_dataset[test_i]['PassengerId'].to_list(),
             'train_sha256': hashlib.sha256((data_path / 'train.csv').read_bytes()).hexdigest(),
             'parameters': parameters, 'extra': extra,
             'versions': {package: version(package) for package in ['marimo', 'scikit-learn', 'polars', 'numpy', 'torch', 'optuna', 'catboost', 'lightgbm', 'xgboost']},
@@ -256,18 +256,18 @@ def _(mo):
 
 
 @app.cell
-def _(X_fit, X_stop, clone, preprocess, torch, y_fit, y_stop):
+def _(X_train, X_val, clone, preprocess, torch, y_train, y_val):
     nn_preprocess = clone(preprocess)
-    X_train_np = nn_preprocess.fit_transform(X_fit)
-    X_val_np = nn_preprocess.transform(X_stop)
+    X_train_np = nn_preprocess.fit_transform(X_train)
+    X_val_np = nn_preprocess.transform(X_val)
 
 
     X_train_t = torch.as_tensor(X_train_np, dtype=torch.float32)
-    y_train_t = torch.tensor(y_fit.to_numpy(),
+    y_train_t = torch.tensor(y_train.to_numpy(),
     dtype=torch.float32).unsqueeze(1)
 
     X_val_t = torch.as_tensor(X_val_np, dtype=torch.float32)
-    y_val_t = torch.tensor(y_stop.to_numpy(),
+    y_val_t = torch.tensor(y_val.to_numpy(),
     dtype=torch.float32).unsqueeze(1)
     return X_train_t, X_val_t, nn_preprocess, y_train_t, y_val_t
 
@@ -327,10 +327,10 @@ def _(categorical_columns, make_preprocess, numeric_columns):
 
 
 @app.cell
-def _(X_fit, X_stop, clone, preprocess_embedding, torch, y_fit, y_stop):
+def _(X_train, X_val, clone, preprocess_embedding, torch, y_train, y_val):
     nn_preprocess_embedding = clone(preprocess_embedding)
-    X_train_np_emb = nn_preprocess_embedding.fit_transform(X_fit)
-    X_val_np_emb = nn_preprocess_embedding.transform(X_stop)
+    X_train_np_emb = nn_preprocess_embedding.fit_transform(X_train)
+    X_val_np_emb = nn_preprocess_embedding.transform(X_val)
 
     cat_sizes = [len(values) + 1 for values in nn_preprocess_embedding.named_transformers_["categorical"].named_steps["encoder"].categories_]
 
@@ -340,14 +340,14 @@ def _(X_fit, X_stop, clone, preprocess_embedding, torch, y_fit, y_stop):
     X_train_t_emb = torch.as_tensor(
         X_train_np_emb, dtype=torch.float32
     )
-    y_train_t_emb = torch.tensor(y_fit.to_numpy(),
+    y_train_t_emb = torch.tensor(y_train.to_numpy(),
     dtype=torch.float32).unsqueeze(1)
 
 
     X_val_t_emb = torch.as_tensor(
         X_val_np_emb, dtype=torch.float32
     )
-    y_val_t_emb = torch.tensor(y_stop.to_numpy(),
+    y_val_t_emb = torch.tensor(y_val.to_numpy(),
     dtype=torch.float32).unsqueeze(1)
     return (
         X_train_t_emb,
@@ -398,7 +398,7 @@ def _(mo):
     Размер входа one-hot берётся из тензора. Размеры embedding-словарей
     получены из категорий train encoder, плюс один индекс для неизвестного.
     Срезы numeric/categorical берутся из output_indices_. Обе ветки обучают
-    preprocessing только на X_fit; внутренний X_stop получает transform. В режиме
+    preprocessing только на X_train; внутренний X_val получает transform. В режиме
     CV preprocessing, входной размер и embedding-словари создаются заново
     внутри каждого фолда.
 
@@ -472,7 +472,7 @@ def _(DEVICE):
     from training import train_epochs
 
     def epoch_train(model, loss_model, opt, train_loader, val_loader, sched=None, epoches=15, trial=None):
-        # val_loader is an internal stopping split, never the 20% holdout.
+        # val_loader is an internal val split, never the 20% test.
         return train_epochs(model, loss_model, opt, train_loader, val_loader,
                             sched, epoches, trial, device=DEVICE)
 
@@ -523,9 +523,9 @@ def _(DEVICE, MyModelEmb, SEED, np, train_test_split):
         if trial is not None:
             raise ValueError('Для подбора используй run_cv_experiment; cv_train оценивает фиксированную конфигурацию.')
         results = {'folds': [], 'metrics': {}, 'summary': None}
-        for fold, (train_idx, val_idx) in enumerate(cv.split(X, y), start=1):
-            fit_idx, stop_idx = train_test_split(
-                train_idx, test_size=0.2, stratify=np.asarray(y)[train_idx], random_state=SEED + fold,
+        for fold, (cv_train_idx, cv_val_idx) in enumerate(cv.split(X, y), start=1):
+            train_idx, val_idx = train_test_split(
+                cv_train_idx, test_size=0.2, stratify=np.asarray(y)[cv_train_idx], random_state=SEED + fold,
             )
             configuration = {
                 'model_params': model_params, 'optimizer_name': opt_cls.__name__,
@@ -534,20 +534,20 @@ def _(DEVICE, MyModelEmb, SEED, np, train_test_split):
                 'scheduler_params': sched_params,
             }
             fitted = fit_dnn(
-                model_cls, configuration, preprocess, X[fit_idx], y[fit_idx], X[stop_idx], y[stop_idx],
+                model_cls, configuration, preprocess, X[train_idx], y[train_idx], X[val_idx], y[val_idx],
                 seed=SEED + fold, epochs=epoches, device=DEVICE,
                 embedding_columns=['sex', 'embarked', 'cabin', 'ticket', 'title'] if model_cls is MyModelEmb else None,
             )
-            predictions, _ = predict_dnn(fitted['model'], fitted['preprocess'], X[val_idx], DEVICE)
-            outer_acc = float(np.mean(predictions == np.asarray(y)[val_idx]))
+            predictions, _ = predict_dnn(fitted['model'], fitted['preprocess'], X[cv_val_idx], DEVICE)
+            outer_acc = float(np.mean(predictions == np.asarray(y)[cv_val_idx]))
             results['folds'].append({
                 **fitted, 'fold': fold, 'outer_val_acc': outer_acc,
-                'fit_indices': fit_idx.tolist(), 'stop_indices': stop_idx.tolist(),
-                'outer_val_indices': val_idx.tolist(),
+                'train_indices': train_idx.tolist(), 'val_indices': val_idx.tolist(),
+                'outer_val_indices': cv_val_idx.tolist(),
             })
         for metric in ['train_loss', 'train_acc', 'val_loss', 'val_acc']:
             values = np.asarray([fold[metric] for fold in results['folds']])
-            # Curves refer to INTERNAL stopping validation, not outer predictions.
+            # Curves describe the internal val split used for epoch selection.
             results[metric] = {'mean': values.mean(axis=0).tolist(), 'std': values.std(axis=0).tolist()}
             results['metrics'][metric] = {'mean': float(values[:, -1].mean()), 'std': float(values[:, -1].std())}
         outer_scores = [fold['outer_val_acc'] for fold in results['folds']]
@@ -637,7 +637,7 @@ def _(
     RUN_DNN,
     SEED,
     USE_CV,
-    X_train,
+    X_train_cv,
     X_train_t,
     compare_dnn,
     cv,
@@ -650,20 +650,20 @@ def _(
     torch,
     train_loader,
     val_loader,
-    y_train,
+    y_train_cv,
 ):
     results1, results2, fig = None, None, None
     if RUN_DNN:
         if USE_CV:
             results1 = cv_train(
                 MLPModel, {'out': 1}, nn.BCEWithLogitsLoss(),
-                torch.optim.Adam, {'lr': 0.01}, {}, cv, X_train, y_train,
+                torch.optim.Adam, {'lr': 0.01}, {}, cv, X_train_cv, y_train_cv,
                 preprocess, epoches=10,
             )
             results2 = cv_train(
                 MyModel, {'out': 1, 'hidden_sizes': [500, 200, 50], 'dropout': 0.0},
                 nn.BCEWithLogitsLoss(), torch.optim.AdamW, {'lr': 3e-4}, {},
-                cv, X_train, y_train, preprocess,
+                cv, X_train_cv, y_train_cv, preprocess,
                 sched_cls=torch.optim.lr_scheduler.ReduceLROnPlateau, epoches=10,
             )
             fig = plot_res(results1, results2)
@@ -726,7 +726,7 @@ def _(
     RUN_ABLATIONS,
     SEED,
     USE_CV,
-    X_train,
+    X_train_cv,
     X_train_t,
     cv,
     cv_train,
@@ -739,7 +739,7 @@ def _(
     torch,
     train_loader,
     val_loader,
-    y_train,
+    y_train_cv,
 ):
     ablation_setups = {
         'Adam': {'optimizer': 'Adam', 'lr': 3e-4, 'dropout': 0.0, 'scheduler': 'none'},
@@ -765,7 +765,7 @@ def _(
                 _res = cv_train(
                     MyModel, {'out': 1, 'dropout': _params['dropout']}, nn.BCEWithLogitsLoss(),
                     getattr(torch.optim, _params['optimizer']), {'lr': _params['lr']},
-                    _scheduler_params, cv, X_train, y_train, preprocess,
+                    _scheduler_params, cv, X_train_cv, y_train_cv, preprocess,
                     sched_cls=_scheduler_cls, epoches=15,
                 )
                 _rows.append({'experiment': _name, 'model': 'MyModel',
@@ -885,7 +885,7 @@ def _(mo):
     mo.md(r"""
     Внешние предсказания получены после загрузки сохранённых весов и
     preprocessing. `best_epoch` и `best_val_acc` относятся к внутреннему
-    stopping split; `last_epoch` — число выполненных эпох, `outer_val_acc`
+    val split; `last_epoch` — число выполненных эпох, `outer_val_acc`
     — accuracy сохранённой модели на внешнем фолде. Подбор, scheduler и
     выбор весов не видят outer validation. Старые файлы не перезаписываются.
     """)
@@ -921,7 +921,7 @@ def _(Path, base_path, torch):
 def _(mo):
     mo.md(r"""
     В старых папках сохранены 71/80/88/82 завершённых trial-файла;
-    это не обязательно полные studies. Лучший записанный holdout ordinary
+    это не обязательно полные studies. Лучший записанный test ordinary
     `default_optim_v1` — 0.9050, embedding `emb_optim_v1` — 0.8659.
     Они являются максимумами выбора по эпохам и trials. В старом коде
     сохранялись веса последней эпохи, поэтому эти числа не удостоверяют
@@ -936,7 +936,7 @@ def _(mo):
     превосходство DNN над бустингами или embeddings над one-hot.
     Для контролируемого сравнения используй 05. Текущие Optuna-запуски
     используют nested CV 5×3; inner selection scores и outer accuracy
-    сохраняются отдельно. Старые holdout/CV-оценки с ними напрямую не сравниваются.
+    сохраняются отдельно. Старые test/CV-оценки с ними напрямую не сравниваются.
     """)
     return
 

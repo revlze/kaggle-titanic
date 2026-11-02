@@ -38,7 +38,7 @@ def run_pipeline(config, root=ROOT):
         train_dataset = load_data(resolve_path(config.data.train_path, root))
         data = TitanicData(
             train_dataset, feature_set=config.features.feature_set, seed=config.base.seed,
-            development_size=config.validation.development_size,
+            train_size=config.validation.train_size,
         )
         if is_dnn:
             model_spec = utils.get_dnn_spec(config, data)
@@ -58,7 +58,7 @@ def run_pipeline(config, root=ROOT):
                 n_splits=config.validation.n_splits, inner_splits=config.validation.inner_splits,
                 epochs=OmegaConf.select(config, 'training.epochs', default=30), device=device,
                 batch_size=OmegaConf.select(config, 'training.batch_size', default=64),
-                stopping_size=OmegaConf.select(config, 'validation.stopping_size', default=0.2),
+                val_size=OmegaConf.select(config, 'validation.val_size', default=0.2),
                 run_kind=config.base.run_kind, output_dir=run_dir / "evaluation",
             )
             manifest["evaluation"] = "evaluation/results.json"
@@ -67,21 +67,21 @@ def run_pipeline(config, root=ROOT):
             score = result["results"][0]
             print(f"CV accuracy: {score['outer_accuracy_mean']:.4f} ± {score['outer_accuracy_std']:.4f} (fold SD)")
         if mode in {"full", "evaluate", "train"}:
-            print("Evaluating the development-trained model on holdout")
+            print("Evaluating on the local test split")
             refit_all = mode != "evaluate"
             model_path = (fit_custom_dnn(data, model_spec, config, run_dir, refit_all=refit_all) if is_dnn
                           else fit_classical(data, estimator, config, run_dir, distributions, refit_all=refit_all))
-            manifest["holdout"] = "holdout.json"
+            manifest["test"] = "test.json"
             if model_path is not None:
                 manifest["model_path"] = model_path.name
         if mode in {"full", "predict"}:
             if mode == "predict":
                 model_path = resolve_path(config.run.model_path, root)
                 manifest["model_path"] = str(model_path.resolve())
-            # Test data enter the workflow only after training, or in predict mode.
-            test_dataset = load_data(resolve_path(config.data.test_path, root), training=False)
-            submission = (predict_custom_dnn(model_path, test_dataset, run_dir, device)
-                          if model_path.suffix == '.pt' else predict_classical(model_path, test_dataset, run_dir))
+            # Kaggle test data enter only after training, or in predict mode.
+            kaggle_test = load_data(resolve_path(config.data.test_path, root), training=False)
+            submission = (predict_custom_dnn(model_path, kaggle_test, run_dir, device)
+                          if model_path.suffix == '.pt' else predict_classical(model_path, kaggle_test, run_dir))
             manifest["submission"] = "submission.csv"
             print(f"Submission: {len(submission)} rows")
         manifest["status"] = "complete"

@@ -7,7 +7,7 @@ Titanic survival predictions.
 ```mermaid
 flowchart LR
     D["Titanic train + YAML"] --> F["Row-wise features"]
-    F --> E["Development CV"]
+    F --> E["Train CV"]
     E --> R["OOF + accuracy reports"]
     F --> M["Final selection + refit"]
     M --> P["Saved pipeline inference"]
@@ -75,11 +75,16 @@ Each run creates `artifacts/<exp_name>/<UTC timestamp>/`; earlier runs are prese
 | `preprocessing` | One-hot encoding; enable scaling for logistic regression and KNN |
 | `model.name`, `model.params` | Classifier and native constructor parameters |
 | `ensemble` | Member count, soft/hard voting or stacking, OOF folds and meta-model |
-| `validation` | Development fraction, evaluation folds and inner search folds |
+| `validation` | Train fraction, evaluation folds and inner search folds |
 | `tuning` | Optuna enable flag, trial budget and parameter distributions |
 | `training`, `loss`, `optimizer`, `scheduler` | DNN epochs, batch size, device and training settings |
 | `metric.name` | `accuracy`, the supported primary metric |
 | `output.dir` | `artifacts` |
+
+`validation.train_size: 0.8` reserves 80% of the labeled CSV for training and CV;
+the remaining 20% is the local `test` split. DNNs use `validation.val_size: 0.2`
+to split each training portion into `train` and `val` for epoch selection.
+The unlabeled Kaggle `test.csv` is loaded separately as `kaggle_test` for inference.
 
 ```yaml
 run:
@@ -106,8 +111,9 @@ cabin entries, calculated within each passenger's row.
 Check `summary.md` in the run folder for accuracy and final parameters.
 `metrics.json` has the same scores. CV accuracy is the evaluation result;
 the final Optuna score is used for parameter selection.
-Holdout accuracy is measured on the reserved rows before the full-data refit.
-`evaluate` runs CV and holdout evaluation; `full` then refits on all labeled rows.
+Local test accuracy is measured on the reserved rows before the full-data refit
+and saved in `test.json` and `test_predictions.csv`.
+`evaluate` runs CV and test evaluation; `full` then refits on all labeled rows.
 
 `submission.csv` is ready for Kaggle. Classical models use `model.joblib`;
 DNNs use `model.pt` plus `preprocess.joblib` in the same run folder.

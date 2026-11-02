@@ -27,8 +27,8 @@ Tuned KNN: **81.32% ± 3.13 pp** CV, **0.75837** public. Final settings:
 
 ## Validation
 
-Seed `0xFACED`, 712 development rows and
-179 excluded, previously viewed holdout rows. Fixed models use stratified
+Seed `0xFACED`, 712 train rows and
+179 excluded, previously viewed test rows. Fixed models use stratified
 5-fold CV; tuned models use 5 outer / 3 inner folds. Preprocessing is fitted
 inside each training fold. Earlier runs use `base_title_family`; new runs add
 ticket/cabin features as listed in the README.
@@ -37,8 +37,8 @@ Tuned runs also use a separate 3-fold final selection search, then refit on all
 891 labeled rows. The selection score is not an independent accuracy estimate.
 CV spread is fold SD, not a confidence interval.
 
-I split by row, not by family or ticket, and reuse the same development folds
-across experiments. The old holdout is not a fresh final test.
+I split by row, not by family or ticket, and reuse the same train folds
+across experiments. The old test is not a fresh final test.
 
 ## Source and matching boundary
 

@@ -35,7 +35,7 @@ ensemble:
     params: {C: 1.0, max_iter: 2000}
 
 validation:
-  development_size: 0.8
+  train_size: 0.8
   n_splits: 5
   inner_splits: 3
 

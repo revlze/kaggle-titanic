@@ -16,21 +16,21 @@ from utils import predict_classifier
 def run_cv_experiment(data: TitanicData, model_specs, results_path, *,
                           n_trials=20, epochs=30, run_kind="full", device="cpu",
                           tune=True, n_splits=5, inner_splits=3,
-                          output_dir=None, batch_size=64, stopping_size=0.2):
-    """Only the development set enters evaluation fits or hyperparameter search.
+                          output_dir=None, batch_size=64, val_size=0.2):
+    """Only the train set enters evaluation fits or hyperparameter search.
 
     Classical specs contain estimator/distributions; DNN specs contain
     model_cls/preprocess/suggest_params and optional embedding_columns;
     fixed DNN evaluation takes parameters from spec['configuration'].
     The larger notebook DNNs can use the same evaluation without changing
-    their architectures. This stage reserves holdout rows; the fitting stage
+    their architectures. This stage reserves test rows; the fitting stage
     evaluates them after CV and before the optional full-data refit.
     With tune=False, models run ordinary CV without inner search folds.
-    DNNs keep an internal stopping split separate from evaluation folds.
+    DNNs keep an internal validation split separate from evaluation folds.
     Existing notebook calls retain the nested-CV defaults.
 
     Args:
-        data: Shared TitanicData instance containing the fixed development/holdout split.
+        data: Shared TitanicData instance containing the fixed train/test split.
         model_specs: Mapping from model names to classical or DNN specifications.
         results_path: Parent directory for a generated evaluation run directory.
         n_trials: Optuna trials per model and outer fold when tune is True.
@@ -43,7 +43,7 @@ def run_cv_experiment(data: TitanicData, model_specs, results_path, *,
         inner_splits: Number of inner folds used for parameter selection.
         output_dir: Exact new evaluation directory, overriding results_path/run_id.
         batch_size: Requested DNN batch size.
-        stopping_size: Fraction of DNN training rows reserved for internal stopping.
+        val_size: Fraction of DNN training rows reserved for internal validation.
 
     Returns:
         A results dictionary containing the protocol, model summaries, fold records
@@ -54,18 +54,18 @@ def run_cv_experiment(data: TitanicData, model_specs, results_path, *,
         raise ValueError("n_trials and epochs must be positive")
     
     train_dataset = data.train_dataset
-    X_dev, y_dev = data.X_dev, data.y_dev
-    train_i, holdout_i = data.train_i, data.holdout_i
+    X, y = data.X_train, data.y_train
+    train_i, test_i = data.train_i, data.test_i
     seed, feature_set = data.seed, data.feature_set
 
     cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
-    outer_splits = list(cv.split(X_dev, y_dev))
+    outer_splits = list(cv.split(X, y))
 
     run_dir, manifest = utils.create_evaluation_run(
-        train_dataset, model_specs, results_path, train_i, holdout_i, outer_splits,
+        train_dataset, model_specs, results_path, train_i, test_i, outer_splits,
         feature_set=feature_set, seed=seed, n_trials=n_trials, epochs=epochs,
-        run_kind=run_kind, device=device, tune=tune, development_size=data.development_size,
-        inner_splits=inner_splits, stopping_size=stopping_size, output_dir=output_dir,
+        run_kind=run_kind, device=device, tune=tune, train_size=data.train_size,
+        inner_splits=inner_splits, val_size=val_size, output_dir=output_dir,
     )
 
     score_role = manifest["score_role"]
@@ -76,11 +76,11 @@ def run_cv_experiment(data: TitanicData, model_specs, results_path, *,
         model_dir = run_dir / name
         model_dir.mkdir(parents=True)
         model_scores, selection_scores = [], []
-        for fold, (fit, val) in enumerate(outer_splits, start=1):
+        for fold, (train, val) in enumerate(outer_splits, start=1):
             fold_seed = seed + fold
-            X_fit, y_fit = X_dev[fit], y_dev[fit]
+            X_train, y_train = X[train], y[train]
             inner = (list(StratifiedKFold(n_splits=inner_splits, shuffle=True, random_state=fold_seed)
-                          .split(X_fit, y_fit)) if tune else [])
+                          .split(X_train, y_train)) if tune else [])
             study = None
 
             record = {"model": name, "outer_fold": fold, "seed": fold_seed,
@@ -89,44 +89,44 @@ def run_cv_experiment(data: TitanicData, model_specs, results_path, *,
             if spec["kind"] == "classical":
                 if tune:
                     search = tune_classical(
-                        spec["estimator"], spec["distributions"], X_fit, y_fit, inner,
+                        spec["estimator"], spec["distributions"], X_train, y_train, inner,
                         seed=fold_seed, n_trials=n_trials,
                     )
                     fitted = search.best_estimator_
                     study = search.study_
                     record.update(inner_selection_accuracy=float(search.best_score_), best_params=search.best_params_)
                 else:
-                    fitted = clone(spec["estimator"]).fit(X_fit, y_fit)
+                    fitted = clone(spec["estimator"]).fit(X_train, y_train)
                     record.update(inner_selection_accuracy=None, best_params={})
                 utils.save_classical_fold(fitted, run_dir, record)
-                predictions, probabilities = predict_classifier(fitted, X_dev[val])
+                predictions, probabilities = predict_classifier(fitted, X[val])
             elif spec["kind"] == "dnn":
                 if tune:
-                    study = tune_dnn(spec, X_fit, y_fit, inner, seed=fold_seed, n_trials=n_trials,
-                                     epochs=epochs, device=device, batch_size=batch_size, stopping_size=stopping_size)
+                    study = tune_dnn(spec, X_train, y_train, inner, seed=fold_seed, n_trials=n_trials,
+                                     epochs=epochs, device=device, batch_size=batch_size, val_size=val_size)
                     configuration = study.best_trial.user_attrs['configuration']
                 else:
                     configuration = spec['configuration']
-                # The outer training rows supply BOTH fit and stopping subsets.
-                X_train, X_stop, y_train, y_stop, fit_i, stop_i = train_test_split(
-                    X_fit, y_fit, fit, test_size=stopping_size,
-                    stratify=y_fit, random_state=fold_seed,
+                # Split only the outer train rows into train and val for epoch selection.
+                X_train, X_val, y_train, y_val, train_fold_i, val_fold_i = train_test_split(
+                    X_train, y_train, train, test_size=val_size,
+                    stratify=y_train, random_state=fold_seed,
                 )
                 fitted = fit_dnn(
                     spec["model_cls"], configuration, spec["preprocess"],
-                    X_train, y_train, X_stop, y_stop, seed=fold_seed,
+                    X_train, y_train, X_val, y_val, seed=fold_seed,
                     epochs=epochs, embedding_columns=spec.get("embedding_columns"), device=device, batch_size=batch_size,
                 )
                 utils.save_dnn_fold(
                     fitted, spec["model_cls"], run_dir, record,
-                    fit_indices=train_i[fit_i], stop_indices=train_i[stop_i],
+                    train_indices=train_i[train_fold_i], val_indices=train_i[val_fold_i],
                     study=study,
                 )
-                predictions, probabilities = predict_dnn(fitted["model"], fitted["preprocess"], X_dev[val], device)
+                predictions, probabilities = predict_dnn(fitted["model"], fitted["preprocess"], X[val], device)
             else:
                 raise ValueError(f"Unknown model kind: {spec['kind']}")
             
-            outer_accuracy = float(accuracy_score(y_dev[val], predictions))
+            outer_accuracy = float(accuracy_score(y[val], predictions))
             record["outer_val_acc"] = outer_accuracy
             fold_records.append(record)
             model_scores.append(outer_accuracy)
@@ -135,7 +135,7 @@ def run_cv_experiment(data: TitanicData, model_specs, results_path, *,
                 selection_scores.append(record["inner_selection_accuracy"])
                 utils.save_trials(study, model_dir / f"fold_{fold}_trials.csv")
             utils.record_oof_predictions(
-                oof_rows, record, val, train_i, train_dataset, y_dev, predictions, probabilities,
+                oof_rows, record, val, train_i, train_dataset, y, predictions, probabilities,
             )
 
         model_oof = pl.DataFrame([r for r in oof_rows if r["model"] == name])
@@ -147,6 +147,6 @@ def run_cv_experiment(data: TitanicData, model_specs, results_path, *,
                         "probabilities_available": model_oof["p_survived"].null_count() == 0,
                         "mean_inner_selection_accuracy": float(np.mean(selection_scores)) if tune else None})
         
-    oof = pl.DataFrame(oof_rows).with_columns(pl.col("p_survived").cast(pl.Float64)).sort(["model", "development_index"])
+    oof = pl.DataFrame(oof_rows).with_columns(pl.col("p_survived").cast(pl.Float64)).sort(["model", "train_index"])
 
     return utils.save_evaluation_results(run_dir, manifest, summary, fold_records, oof)

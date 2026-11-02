@@ -113,7 +113,7 @@ def _(mo):
 @app.cell
 def _(data_path, pl):
     train_dataset = pl.read_csv(data_path / 'train.csv')
-    test_dataset = pl.read_csv(data_path / 'test.csv')
+    kaggle_test = pl.read_csv(data_path / 'test.csv')
     return (train_dataset,)
 
 
@@ -127,12 +127,12 @@ def _():
 @app.cell
 def _(SEED, StratifiedKFold, np, train_dataset, train_test_split):
     y = train_dataset['Survived']
-    train_i, val_i = train_test_split(
+    train_i, test_i = train_test_split(
         np.arange(len(train_dataset)), train_size=0.8, stratify=y, random_state=SEED,
     )
-    y_train, y_val = y[train_i], y[val_i]
+    y_train, y_test = y[train_i], y[test_i]
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=SEED)
-    return cv, train_i, val_i, y_train, y_val
+    return cv, train_i, test_i, y_train, y_test
 
 
 @app.cell
@@ -191,7 +191,7 @@ def _(accuracy_score, clone, np, pl, tqdm):
         return result
 
 
-    def start_fits(models, params, cv, X_train, y_train, X_val, y_val):
+    def start_fits(models, params, cv, X_train, y_train, X_test, y_test):
         results = []
 
         for model_name, model in models.items():
@@ -206,7 +206,7 @@ def _(accuracy_score, clone, np, pl, tqdm):
                 y_train
             )
 
-            # Feature selection must not inspect the previously viewed holdout.
+            # Feature selection must not inspect the previously viewed test.
             result["score_role"] = "exploratory_feature_cv"
 
 
@@ -229,7 +229,7 @@ def _(
     results_path,
     train_dataset,
     train_i,
-    val_i,
+    test_i,
 ):
     def save_experiments(results, name, parameters=None, feature_set='base',
                          score_role='exploratory_feature_cv', extra=None):
@@ -245,9 +245,9 @@ def _(
             'run_id': path.stem, 'session_id': RUN_ID, 'name': name, 'feature_set': feature_set,
             'seed': SEED, 'metric': 'accuracy', 'score_role': score_role,
             'protocol': 'stratified_80_20_then_5fold_shuffle_v1',
-            'train_indices': train_i.tolist(), 'holdout_indices': val_i.tolist(),
+            'train_indices': train_i.tolist(), 'test_indices': test_i.tolist(),
             'train_passenger_ids': train_dataset[train_i]['PassengerId'].to_list(),
-            'holdout_passenger_ids': train_dataset[val_i]['PassengerId'].to_list(),
+            'test_passenger_ids': train_dataset[test_i]['PassengerId'].to_list(),
             'train_sha256': hashlib.sha256((data_path / 'train.csv').read_bytes()).hexdigest(),
             'parameters': parameters, 'extra': extra,
             'versions': {package: version(package) for package in ['marimo', 'scikit-learn', 'polars', 'numpy', 'torch', 'optuna', 'catboost', 'lightgbm', 'xgboost']},
@@ -286,9 +286,9 @@ def _(
     start_fits,
     train_dataset,
     train_i,
-    val_i,
+    test_i,
     y_train,
-    y_val,
+    y_test,
 ):
     feature_results = None
     if RUN_MODELS:
@@ -300,7 +300,7 @@ def _(
                                 ('model', clone(model))])
                 for name, model in feature_models.items()
             }
-            _table = start_fits(_models, None, cv, _X[train_i], y_train, _X[val_i], y_val)
+            _table = start_fits(_models, None, cv, _X[train_i], y_train, _X[test_i], y_test)
             _table = _table.with_columns(pl.lit(_variant).alias('features'))
             _records.append(_table)
             save_experiments(_table, f'features_{_variant}', feature_set=_variant,
@@ -380,9 +380,9 @@ def _(
     start_fits,
     train_dataset,
     train_i,
-    val_i,
+    test_i,
     y_train,
-    y_val,
+    y_test,
 ):
     preprocess_results = None
     if RUN_PREPROCESS:
@@ -393,7 +393,7 @@ def _(
                 ('preprocess', make_preprocess(_numeric, _categorical, _encoding, _scale)),
                 ('model', clone(model)),
             ]) for name, model in feature_models.items()}
-            _table = start_fits(_models, None, cv, _X[train_i], y_train, _X[val_i], y_val)
+            _table = start_fits(_models, None, cv, _X[train_i], y_train, _X[test_i], y_test)
             _label = f'{_encoding}_scale_{_scale}'
             _table = _table.with_columns(pl.lit(_label).alias('preprocessing'))
             _records.append(_table)
