@@ -55,6 +55,7 @@ def run_pipeline(config, root=ROOT):
             result = run_cv_experiment(
                 data, {config.model.name: model_spec}, run_dir,
                 tune=config.tuning.enabled, n_trials=config.tuning.n_trials,
+                n_jobs=OmegaConf.select(config, 'tuning.n_jobs', default=1),
                 n_splits=config.validation.n_splits, inner_splits=config.validation.inner_splits,
                 epochs=OmegaConf.select(config, 'training.epochs', default=30), device=device,
                 batch_size=OmegaConf.select(config, 'training.batch_size', default=64),
