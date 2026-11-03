@@ -33,7 +33,7 @@ Check example [configs/](configs/).
 
 Using configs:
 ```bash
-cp configs/config_catboost.yaml config.yaml
+cp configs/best_model.yaml config.yaml
 ```
 
 Optuna is off in the examples; set `tuning.enabled: true` to turn on.
