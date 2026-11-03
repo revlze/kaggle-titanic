@@ -2,7 +2,7 @@
 
 Titanic survival predictions.
 
-**Best recorded Kaggle public accuracy: 0.77990 — five Gradient Boosting models with hard voting, Optuna and the aggregated features family-size; title; extended ticket and cabin features.
+**Best public accuracy**: 0.77990 — five Gradient Boosting models with hard voting, Optuna and the aggregated features family-size; title; extended ticket and cabin features.
 
 ```mermaid
 flowchart LR
