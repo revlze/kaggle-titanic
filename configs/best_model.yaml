@@ -1,64 +1,103 @@
+# Best recorded public Kaggle accuracy: 0.78229 (submission 57945222, user-reported).
+# Fixed parameters from artifacts/gb_lr_rf_dt_optuna_v3/20261103T104807_996097Z.
+# Copy to config.yaml, then run: uv run python run.py
 base:
-  exp_name: gb_best_5_ensebmle
+  exp_name: gb_lr_rf_dt_best_v3
   seed: 1027309
   run_kind: full
+
 run:
   mode: full
   model_path: null
+
 data:
   train_path: data/train.csv
   test_path: data/test.csv
+
 features:
   feature_set: base_title_family_extticket_extcabin
+
 preprocessing:
   encoding: onehot
   scale: false
+
 model:
-  name: GradientBoostingClassifier
-  params:
-    loss: log_loss
-    n_estimators: 100
-    learning_rate: 0.1
-    max_depth: 3
-    min_samples_leaf: 1
-    subsample: 1.0
-    random_state: 1027309
+  name: ensemble
+  params: {}
+
 ensemble:
-  n_models: 5
-  method: hard
+  method: stacking
+  members:
+    - name: GradientBoostingClassifier
+      params:
+        loss: log_loss
+        n_estimators: 250
+        learning_rate: 0.040819563860342245
+        max_depth: 4
+        min_samples_leaf: 5
+        subsample: 0.8508107717512322
+        random_state: 32550037
+      search_space:
+        n_estimators: {type: int, low: 100, high: 400, step: 50}
+        learning_rate: {type: float, low: 0.01, high: 0.1, log: true}
+        max_depth: {type: int, low: 2, high: 4}
+        min_samples_leaf: {type: int, low: 1, high: 15}
+        subsample: {type: float, low: 0.7, high: 1.0}
+    - name: LogisticRegression
+      preprocessing:
+        scale: true
+      params:
+        C: 0.14587028775338703
+        max_iter: 2000
+        random_state: 1588378770
+      search_space:
+        C: {type: float, low: 0.001, high: 100.0, log: true}
+    - name: RandomForestClassifier
+      params:
+        n_estimators: 100
+        max_depth: 4
+        min_samples_leaf: 4
+        max_features: 0.8
+        n_jobs: 1
+        random_state: 2031717221
+      search_space:
+        n_estimators: {type: int, low: 100, high: 400, step: 100}
+        max_depth: {type: int, low: 3, high: 12}
+        min_samples_leaf: {type: int, low: 1, high: 8}
+        max_features: {type: categorical, choices: [sqrt, log2, 0.8]}
+    - name: DecisionTreeClassifier
+      params:
+        max_depth: 2
+        min_samples_leaf: 6
+        criterion: gini
+        random_state: 205482616
+      search_space:
+        max_depth: {type: int, low: 2, high: 10}
+        min_samples_leaf: {type: int, low: 1, high: 15}
+        criterion: {type: categorical, choices: [gini, entropy]}
   stacking_folds: 3
   meta_model:
     name: LogisticRegression
     params:
-      C: 1.0
+      C: 0.030917326491447763
       max_iter: 2000
+      random_state: 1027309
+    search_space:
+      C: {type: float, low: 0.001, high: 100.0, log: true}
+
 validation:
   train_size: 0.8
   n_splits: 5
   inner_splits: 3
+
 tuning:
-  enabled: true
-  n_trials: 10
-  search_space:
-    n_estimators:
-      type: int
-      low: 100
-      high: 400
-      step: 50
-    learning_rate:
-      type: float
-      low: 0.01
-      high: 0.1
-      log: true
-    max_depth:
-      type: int
-      low: 2
-      high: 4
-    min_samples_leaf:
-      type: int
-      low: 1
-      high: 15
+  enabled: false  # Use the saved best parameters without another Optuna search.
+  n_trials: 20
+  n_jobs: 1
+  search_space: {}
+
 metric:
   name: accuracy
+
 output:
   dir: artifacts

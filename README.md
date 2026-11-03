@@ -2,12 +2,14 @@
 
 Titanic survival predictions.
 
-**Best public accuracy**: 0.77990 — five Gradient Boosting models with hard voting, Optuna and the aggregated features family-size; title; extended ticket and cabin features.
+**Best public accuracy**: 0.78229 — stacking of Gradient Boosting, Logistic Regression,
+Random Forest and Decision Tree with a Logistic Regression meta-model, Optuna,
+and title, family-size, extended ticket and cabin features.
 
 ## Recorded results
 
-Local CV is **mean accuracy (%) ± fold SD (percentage points)**. Fixed models use
-5-fold CV; tuned models use nested cv: 5 outer / 3 inner folds (idk, maybe nested CV is not needed here).
+Fixed models use 5-fold CV; tuned models use nested CV(idk, if this necessary): 5 outer / 3 inner folds.
+The best stacking model uses 3 OOF folds to train its meta-model.
 
 <details>
 <summary>Table of results</summary>
@@ -28,26 +30,22 @@ Local CV is **mean accuracy (%) ± fold SD (percentage points)**. Fixed models u
 | LightGBM + ticket/cabin | 0 | 83.42 ± 2.79 | 0.76794 |
 | LightGBM + ticket/cabin + Optuna | 60 | 83.42 ± 1.95 | 0.76794 |
 | Gradient boosting + ticket/cabin (5 models, hard vote) | 0 | 83.43 ± 0.96 | 0.76794 |
-| Gradient boosting + ticket/cabin + Optuna (5 models, hard vote) | 10 | 83.00 ± 2.56 | **0.77990** |
+| Gradient boosting + ticket/cabin + Optuna (5 models, hard vote) | 10 | 83.00 ± 2.56 | 0.77990 |
+| Stacking (GB + LR + RF + DT) + Optuna | 20 | 83.43 ± 1.24 | **0.78229** |
 
 </details>
 
-
 ## Run and configure
 
-Check example [configs/](configs/). 
+Example configurations are in [configs/](configs/).
 
-Using configs:
+To use the selected best parameters:
+
 ```bash
 cp configs/best_model.yaml config.yaml
 ```
 
-Optuna is off in the examples; set `tuning.enabled: true` to turn on.
-
-DNN examples: [MyModel](configs/config_dnn.yaml) and [MyModelEmb](configs/config_dnn_embedding.yaml).
-`custom/Name` loads a PyTorch model from `src/models.py`; input sizes are inferred automatically.
-
-Place the data Titanic at `data/train.csv` and `data/test.csv`, then edit
+Place the Titanic CSVs at `data/train.csv` and `data/test.csv`, then edit if needed
 [config.yaml](config.yaml) and run:
 
 ```bash
@@ -57,6 +55,9 @@ uv run python run.py
 
 Each run creates `artifacts/<exp_name>/<UTC timestamp>/`; earlier runs are preserved.
 
+<details>
+<summary>Configuration options</summary>
+
 | Setting | Purpose / default |
 |---|---|
 | `base.exp_name`, `base.seed` | Run label and existing seed `0xFACED` |
@@ -65,10 +66,10 @@ Each run creates `artifacts/<exp_name>/<UTC timestamp>/`; earlier runs are prese
 | `data.train_path`, `data.test_path` | CSV locations |
 | `features.feature_set` | Current: `base_title_family_extticket_extcabin` |
 | `preprocessing` | One-hot encoding; enable scaling for logistic regression and KNN |
-| `model.name`, `model.params` | Classifier and native constructor parameters |
-| `ensemble` | Member count, soft/hard voting or stacking, OOF folds and meta-model |
+| `model.name`, `model.params` | Classifier (or `ensemble`) and native constructor parameters |
+| `ensemble` | Member algorithms/parameters, soft/hard voting or stacking, OOF folds and meta-model |
 | `validation` | Train fraction, evaluation folds and inner search folds |
-| `tuning` | Optuna enable flag, trial budget and parameter distributions |
+| `tuning` | Optuna enable flag, trial budget, concurrent trials and parameter distributions |
 | `training`, `loss`, `optimizer`, `scheduler` | DNN epochs, batch size, device and training settings |
 | `metric.name` | `accuracy`, the supported primary metric |
 | `output.dir` | `artifacts` |
@@ -84,19 +85,43 @@ run:
   model_path: artifacts/gb_v1/<run_id>/model.joblib
 ```
 
-To change the model, edit `model.name` and `model.params`. If Optuna is enabled,
+For a single classifier, edit `model.name` and `model.params`. If Optuna is enabled,
 replace `tuning.search_space` with parameters for that model too.
 
+For classical models, `tuning.n_jobs` sets the number of concurrent Optuna trials:
+`1` runs sequentially, and `-1` uses the CPU count. Missing settings default to `1`.
+Inner CV and stacking use `n_jobs=1`; keep individual model workers at `1` when
+parallelizing trials. Parallel search may produce different results with the same seed.
+
 For seed ensembles, set `ensemble.n_models` and choose `soft`, `hard` or `stacking`
-in `ensemble.method`. Members use the same model family. KNN and custom DNNs use one model.
+in `ensemble.method`. Without a member list, these are copies of one model family.
+
+For different algorithms or different settings of one algorithm, use
+`model.name: ensemble`, `model.params: {}` and an `ensemble.members` list of
+`name`/`params` entries; see `configs/ensemble.yaml`. The member count comes from
+the list. Each member has its own preprocessing pipeline and may override
+`preprocessing` (for example, `scale: true` for logistic regression).
+With `tuning.enabled: false`, the configured parameters are used directly.
+To tune an explicit ensemble, put `search_space` inside each member and leave
+`tuning.search_space: {}`. One trial samples a full parameter combination for the
+ensemble and is scored by its mean CV accuracy. Seed ensembles also use separate
+parameter paths for each member. Reports save every member's final parameters.
+For stacking, `ensemble.meta_model.search_space` also tunes the meta-model
+in the same study; its selected parameters are saved in the ensemble report.
+Custom DNNs still use one model per run.
+
+</details>
+
+DNN examples: [MyModel](configs/dnn.yaml) and [MyModelEmb](configs/dnn_embedding.yaml).
+`custom/Name` loads a PyTorch model from `src/models.py`; input sizes are inferred automatically.
 
 Base features: `Pclass`, `Age`, `SibSp`, `Parch`, `Fare`, `Sex`, `Embarked`,
 plus `Title`, `FamilySize`, `TicketString`, `TicketNum`, `CabinLet`, `CabinNum`, `CabinCount`. Preprocessing is fitted inside each training fold.
 
-`TicketString`, `TicketNum`: ticket prefix/number and cabin letters
+`TicketString`, `TicketNum`: ticket prefix and numeric suffix.
 
-`CabinLet`, `CabinNum`, `CabinCount`: mean cabin number and count of numbered
-cabin entries, calculated within each passenger's row.
+`CabinLet`, `CabinNum`, `CabinCount`: unique cabin letters, mean cabin number and
+count of numbered cabin entries, calculated within each passenger's row.
 
 ## Outputs
 
@@ -105,7 +130,10 @@ Check `summary.md` in the run folder for accuracy and final parameters.
 the final Optuna score is used for parameter selection.
 Local test accuracy is measured on the reserved rows before the full-data refit
 and saved in `test.json` and `test_predictions.csv`.
-`evaluate` runs CV and test evaluation; `full` then refits on all labeled rows.
+`evaluate` runs CV and local test evaluation without a full-data refit.
+`train` skips CV, evaluates the local test and refits on all labeled rows.
+`full` runs all stages and creates Kaggle predictions; `predict` loads a saved
+model and creates predictions without training.
 
 `submission.csv` is ready for Kaggle. Classical models use `model.joblib`;
 DNNs use `model.pt` plus `preprocess.joblib` in the same run folder.
