@@ -9,6 +9,9 @@ Titanic survival predictions.
 Local CV is **mean accuracy (%) ± fold SD (percentage points)**. Fixed models use
 5-fold CV; tuned models use nested cv: 5 outer / 3 inner folds (idk, maybe nested CV is not needed here).
 
+<details>
+<summary>Table of results</summary>
+
 | Model / setup | Optuna trials / search | Local CV, % ± SD | Public accuracy |
 |---|---:|---:|---:|
 | Logistic regression (baseline) | 0 | 82.72 ± 2.15 | 0.77272 |
@@ -26,6 +29,9 @@ Local CV is **mean accuracy (%) ± fold SD (percentage points)**. Fixed models u
 | LightGBM + ticket/cabin + Optuna | 60 | 83.42 ± 1.95 | 0.76794 |
 | Gradient boosting + ticket/cabin (5 models, hard vote) | 0 | 83.43 ± 0.96 | 0.76794 |
 | Gradient boosting + ticket/cabin + Optuna (5 models, hard vote) | 10 | 83.00 ± 2.56 | **0.77990** |
+
+</details>
+
 
 ## Run and configure
 
