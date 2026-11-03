@@ -4,17 +4,6 @@ Titanic survival predictions.
 
 **Best public accuracy**: 0.77990 — five Gradient Boosting models with hard voting, Optuna and the aggregated features family-size; title; extended ticket and cabin features.
 
-```mermaid
-flowchart LR
-    D["Titanic train + YAML"] --> F["Row-wise features"]
-    F --> E["Train CV"]
-    E --> R["OOF + accuracy reports"]
-    F --> M["Final selection + refit"]
-    M --> P["Saved pipeline inference"]
-    S["Kaggle test"] --> P
-    P --> O["Submission CSV"]
-```
-
 ## Recorded results
 
 Local CV is **mean accuracy (%) ± fold SD (percentage points)**. Fixed models use
