@@ -19,11 +19,12 @@ import torchvision
 import optuna
 from omegaconf import OmegaConf
 from sklearn.base import clone
-from sklearn.ensemble import BaggingClassifier, GradientBoostingClassifier, StackingClassifier, VotingClassifier
+from sklearn.ensemble import BaggingClassifier, GradientBoostingClassifier, RandomForestClassifier, StackingClassifier, VotingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import StratifiedKFold
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.pipeline import Pipeline
+from sklearn.tree import DecisionTreeClassifier
 from xgboost import XGBClassifier
 from catboost import CatBoostClassifier
 from lightgbm import LGBMClassifier
@@ -101,6 +102,8 @@ def get_model(config, *, load_pretrained=True, **runtime_params):
     classifiers = {
         'GradientBoostingClassifier': GradientBoostingClassifier,
         'LogisticRegression': LogisticRegression,
+        'RandomForestClassifier': RandomForestClassifier,
+        'DecisionTreeClassifier': DecisionTreeClassifier,
         'XGBClassifier': XGBClassifier,
         'CatBoostClassifier': CatBoostClassifier,
         'LGBMClassifier': LGBMClassifier,
@@ -132,6 +135,7 @@ def get_pipeline(config, data: TitanicData):
 
     Args:
         config: Feature, preprocessing, model and optional ensemble settings.
+            ensemble.members supplies individual model names and parameters.
         data: Shared TitanicData instance supplying numeric/categorical columns.
 
     Returns:
@@ -141,15 +145,27 @@ def get_pipeline(config, data: TitanicData):
 
     Raises:
         ValueError: The model, ensemble size, voting method or stacking folds
-            are unsupported. KNN supports a single model only.
+            are unsupported. Seed ensembles cannot contain identical KNN copies.
     """
-    if config.model.name not in {
+    supported = {
         'GradientBoostingClassifier', 'LogisticRegression', 'CatBoostClassifier', 'XGBClassifier', 'LGBMClassifier',
-        'KNeighborsClassifier',
-    }:
+        'KNeighborsClassifier', 'RandomForestClassifier', 'DecisionTreeClassifier',
+    }
+    member_configs = OmegaConf.select(config, 'ensemble.members')
+    if member_configs is not None:
+        if config.model.name != 'ensemble':
+            raise ValueError('Set model.name: ensemble when using ensemble.members')
+        if not OmegaConf.is_list(member_configs) or len(member_configs) < 2:
+            raise ValueError('ensemble.members must list at least two models')
+        n_models = len(member_configs)
+        configured_count = OmegaConf.select(config, 'ensemble.n_models', default=n_models)
+        if configured_count != n_models:
+            raise ValueError('ensemble.n_models must match the length of ensemble.members, or be omitted')
+    elif config.model.name not in supported:
         raise ValueError(f'Unsupported classical model: {config.model.name}')
-    model = get_model(config)
-    n_models = OmegaConf.select(config, 'ensemble.n_models', default=1)
+    else:
+        model = get_model(config)
+        n_models = OmegaConf.select(config, 'ensemble.n_models', default=1)
     if type(n_models) is not int or n_models < 1:
         raise ValueError('ensemble.n_models must be a positive integer')
     if config.model.name == 'KNeighborsClassifier' and n_models > 1:
@@ -163,10 +179,23 @@ def get_pipeline(config, data: TitanicData):
         seeds = np.random.RandomState(config.base.seed).randint(np.iinfo(np.int32).max, size=n_models)
         members = []
         for index, seed in enumerate(seeds):
-            member = clone(model).set_params(random_state=int(seed))
-            if method == 'stacking':
+            member_preprocess = preprocess
+            if member_configs is not None:
+                member_config = member_configs[index]
+                if member_config.name not in supported:
+                    raise ValueError(f'Unsupported ensemble member: {member_config.name}')
+                params = OmegaConf.to_container(member_config.params, resolve=True) if 'params' in member_config else {}
+                member = get_model(OmegaConf.create({
+                    'base': {'seed': int(seed)},
+                    'model': {'name': member_config.name, 'params': params},
+                }))
+                preprocessing = OmegaConf.merge(config.preprocessing, member_config.get('preprocessing', {}))
+                member_preprocess = make_preprocess(numeric, categorical, **preprocessing)
+            else:
+                member = clone(model).set_params(random_state=int(seed))
+            if method == 'stacking' or member_configs is not None:
                 # cross_val_predict must fit preprocessing inside each stacking fold.
-                member = Pipeline([('preprocess', clone(preprocess)), ('model', member)])
+                member = Pipeline([('preprocess', clone(member_preprocess)), ('model', member)])
             members.append((f'member_{index}', member))
         if method == 'stacking':
             folds = OmegaConf.select(config, 'ensemble.stacking_folds', default=3)
@@ -183,6 +212,8 @@ def get_pipeline(config, data: TitanicData):
             )
             return Pipeline([('model', model)])
         model = VotingClassifier(estimators=members, voting=method, n_jobs=1)
+        if member_configs is not None:
+            return Pipeline([('model', model)])
     return Pipeline([
         ('preprocess', preprocess),
         ('model', model),
@@ -267,21 +298,27 @@ def get_model_report(model):
         model: Fitted classifier or fitted bagging, voting or stacking ensemble.
 
     Returns:
-        A dictionary with parameters and ensemble metadata. Ensemble parameters
-        come from the first member; individual random seeds are listed separately.
+        A dictionary with parameters and ensemble metadata. Common parameters
+        are reported only for identical member settings; every member's own
+        algorithm and parameters are always saved in ensemble.members.
         Stacking metadata also includes the fitted meta-model and OOF fold count.
     """
     if isinstance(model, (BaggingClassifier, VotingClassifier, StackingClassifier)):
         members = [member.named_steps['model'] if isinstance(member, Pipeline) else member
                    for member in model.estimators_]
-        parameters = members[0].get_params()
-        # Each fitted member has its own seed; there is no single model seed.
-        parameters.pop('random_state', None)
+        member_reports = [{'name': type(member).__name__, 'params': member.get_params()} for member in members]
+        member_parameters = [{name: value for name, value in report['params'].items()
+                              if name not in {'random_state', 'random_seed'}} for report in member_reports]
+        same_settings = all(report['name'] == member_reports[0]['name'] for report in member_reports)
+        # Compare the saved representation: XGBoost defaults include NaN, which is not equal to itself.
+        same_settings = same_settings and len({json.dumps(params, sort_keys=True) for params in member_parameters}) == 1
+        parameters = member_parameters[0] if same_settings else {}
         method = 'stacking' if isinstance(model, StackingClassifier) else getattr(model, 'voting', 'soft')
         ensemble = {
             'n_models': len(members), 'method': method,
             'aggregation': {'soft': 'mean_probability', 'hard': 'majority_vote', 'stacking': 'meta_model'}[method],
-            'random_states': [member.get_params()['random_state'] for member in members],
+            'random_states': [member.get_params().get('random_state') for member in members],
+            'members': member_reports,
         }
         if method == 'stacking':
             ensemble.update(stacking_folds=model.cv.n_splits, meta_model={
@@ -312,12 +349,13 @@ def get_search_space(config, estimator):
     """Translate YAML tuning ranges into validated Optuna distributions.
 
     Args:
-        config: Configuration containing tuning.search_space and model.name.
+        config: Configuration containing tuning.search_space, or individual
+            search_space mappings inside ensemble.members and ensemble.meta_model.
         estimator: Unfitted pipeline defining valid model parameter names.
 
     Returns:
-        A dictionary keyed by sklearn parameter paths. Voting/stacking paths
-        target the first member; tune_classical shares each setting across members.
+        A dictionary keyed by sklearn parameter paths. Every ensemble member
+        and stacking meta-model has its own independently sampled parameters.
 
     Raises:
         ValueError: The space is empty, a parameter/type is unknown, or an
@@ -330,30 +368,42 @@ def get_search_space(config, estimator):
     }
     space = {}
     model = estimator.named_steps['model']
+    targets = []
     if isinstance(model, (VotingClassifier, StackingClassifier)):
-        name, base_model = model.estimators[0]
-        prefix = f'model__{name}__'
-        if isinstance(base_model, Pipeline):
-            base_model = base_model.named_steps['model']
-            prefix += 'model__'
+        member_configs = OmegaConf.select(config, 'ensemble.members')
+        if member_configs is not None and OmegaConf.select(config, 'tuning.search_space', default={}):
+            raise ValueError('Put search_space inside each ensemble.members entry for an explicit ensemble')
+        for index, (name, base_model) in enumerate(model.estimators):
+            prefix = f'model__{name}__'
+            if isinstance(base_model, Pipeline):
+                base_model = base_model.named_steps['model']
+                prefix += 'model__'
+            ranges = (member_configs[index].get('search_space', OmegaConf.create({})) if member_configs is not None
+                      else config.tuning.search_space)
+            targets.append((base_model, prefix, ranges))
+        if isinstance(model, StackingClassifier):
+            meta_ranges = OmegaConf.select(config, 'ensemble.meta_model.search_space', default=OmegaConf.create({}))
+            targets.append((model.final_estimator, 'model__final_estimator__', meta_ranges))
     else:
         base_model = model.estimator if isinstance(model, BaggingClassifier) else model
         prefix = 'model__estimator__' if isinstance(model, BaggingClassifier) else 'model__'
-    known_parameters = set(base_model.get_params())
-    # CatBoost lists only explicitly supplied parameters in get_params().
-    if isinstance(base_model, CatBoostClassifier):
-        import inspect
-        known_parameters.update(inspect.signature(CatBoostClassifier).parameters)
-    for name, settings in OmegaConf.to_container(config.tuning.search_space, resolve=True).items():
-        key = prefix + name
-        if name not in known_parameters:
-            raise ValueError(f'Unknown tuning parameter for {config.model.name}: {name}')
-        if isinstance(model, (BaggingClassifier, VotingClassifier, StackingClassifier)) and name in {'random_state', 'random_seed'}:
-            raise ValueError('Ensemble seeds come from base.seed; do not tune random_state/random_seed')
-        kind = settings.pop('type')
-        if kind not in distributions:
-            raise ValueError(f'Unknown distribution type: {kind}')
-        space[key] = distributions[kind](**settings)
+        targets.append((base_model, prefix, config.tuning.search_space))
+    for base_model, prefix, ranges in targets:
+        known_parameters = set(base_model.get_params())
+        # CatBoost lists only explicitly supplied parameters in get_params().
+        if isinstance(base_model, CatBoostClassifier):
+            import inspect
+            known_parameters.update(inspect.signature(CatBoostClassifier).parameters)
+        for name, settings in OmegaConf.to_container(ranges, resolve=True).items():
+            key = prefix + name
+            if name not in known_parameters:
+                raise ValueError(f'Unknown tuning parameter for {type(base_model).__name__}: {name}')
+            if isinstance(model, (BaggingClassifier, VotingClassifier, StackingClassifier)) and name in {'random_state', 'random_seed'}:
+                raise ValueError('Do not tune ensemble member seeds')
+            kind = settings.pop('type')
+            if kind not in distributions:
+                raise ValueError(f'Unknown distribution type: {kind}')
+            space[key] = distributions[kind](**settings)
     if not space:
         raise ValueError('Optuna requires a non-empty tuning.search_space')
     return space
@@ -391,10 +441,27 @@ def write_run_summary(run_dir):
     }
     final_parameters = {name: value for name, value in parameters.items() if name in parameter_names}
     training_config = inference.get("training_configuration", {}) if manifest["mode"] == "predict" else config
+    configured_members = OmegaConf.select(OmegaConf.create(training_config), "ensemble.members")
     ensemble = training.get("ensemble") or inference.get("ensemble") or {
-        "n_models": OmegaConf.select(OmegaConf.create(training_config), "ensemble.n_models", default=1),
+        "n_models": len(configured_members) if configured_members is not None else OmegaConf.select(
+            OmegaConf.create(training_config), "ensemble.n_models", default=1),
         "method": OmegaConf.select(OmegaConf.create(training_config), "ensemble.method", default="soft"),
     }
+    final_members = []
+    if training and (configured_members is not None or not parameters):
+        for index, member in enumerate(ensemble.get("members", [])):
+            member_config = configured_members[index] if configured_members is not None else config.model
+            parameter_names = set(member_config.get("params", {})) | {
+                name.rsplit("__", 1)[-1] for name in selection.get("best_params", {})
+                if name.startswith(f"model__member_{index}__")
+            }
+            selected = {"name": member["name"], "params": {
+                name: value for name, value in member["params"].items()
+                if name in parameter_names or name in {"random_state", "random_seed"}
+            }}
+            if "preprocessing" in member_config:
+                selected["preprocessing"] = OmegaConf.to_container(member_config.preprocessing, resolve=True)
+            final_members.append(selected)
     metrics = {
         "experiment": manifest["exp_name"], "status": manifest["status"],
         "run_kind": manifest["run_kind"],
@@ -411,7 +478,7 @@ def write_run_summary(run_dir):
         "final_selection_cv_accuracy": selection.get("accuracy"),
         "trials_per_search": config.tuning.n_trials if config.tuning.enabled else 0,
         "final_model_fit_rows": training.get("fitted_rows"),
-        "final_model_parameters": final_parameters or None,
+        "final_model_parameters": final_members or final_parameters or None,
         "ensemble": ensemble,
         "probabilities_available": training.get("probabilities_available",
                                                 inference.get("probabilities_available", score.get("probabilities_available"))),
@@ -433,6 +500,8 @@ def write_run_summary(run_dir):
                        "hard": "majority vote of class labels", "stacking": "meta-model trained on OOF probabilities"}[method]
         lines += [f"Ensemble: **{ensemble['n_models']} models**, **{method}**: {description}. "
                   "CV evaluates the complete ensemble.", ""]
+        if ensemble.get("members"):
+            lines += ["Members: " + ", ".join(member["name"] for member in ensemble["members"]) + ".", ""]
         if method == "hard":
             lines += ["Hard voting provides class labels only; `p_survived` is empty in prediction/OOF CSVs.", ""]
         if ensemble.get("meta_model"):
@@ -477,12 +546,19 @@ def write_run_summary(run_dir):
             ]
         else:
             lines += ["Parameters came directly from the YAML; final Optuna search was disabled.", ""]
+        selected_config = {"model": {"name": metrics["model"], "params": final_parameters}}
+        if final_members:
+            selected_config = {"model": {"name": "ensemble", "params": {}},
+                               "ensemble": {"method": ensemble["method"], "members": final_members}}
+            if ensemble.get("meta_model"):
+                selected_config["ensemble"].update(stacking_folds=ensemble["stacking_folds"],
+                                                   meta_model=ensemble["meta_model"])
         lines += [
             f"The saved model was refitted on **{metrics['final_model_fit_rows']} labeled rows**. "
             "It has no separate accuracy on unseen data after that refit. "
             "Use the CV estimate above to assess the training procedure; Kaggle test labels are unavailable.", "",
             "Selected parameters:", "", "```yaml",
-            OmegaConf.to_yaml(OmegaConf.create({"model": {"name": metrics["model"], "params": final_parameters}})).rstrip(),
+            OmegaConf.to_yaml(OmegaConf.create(selected_config)).rstrip(),
             "```", "",
         ]
     else:
