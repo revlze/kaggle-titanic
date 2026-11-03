@@ -9,9 +9,7 @@ import numpy as np
 import optuna
 import torch
 from omegaconf import OmegaConf
-from optuna_integration.sklearn import OptunaSearchCV
 from sklearn.base import clone
-from sklearn.ensemble import StackingClassifier, VotingClassifier
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import StratifiedKFold, cross_val_score, train_test_split
 from torch.utils.data import DataLoader, TensorDataset
@@ -22,7 +20,7 @@ from features import make_features
 from models import build_dnn, restore_dnn
 
 
-def tune_classical(estimator, distributions, X, y, cv, *, seed, n_trials):
+def tune_classical(estimator, distributions, X, y, cv, *, seed, n_trials, n_jobs=1):
     """Tune a classical pipeline by mean CV accuracy on the supplied rows.
 
     Args:
@@ -33,62 +31,46 @@ def tune_classical(estimator, distributions, X, y, cv, *, seed, n_trials):
         cv: Fit/validation index pairs relative to X and y.
         seed: Seed for the Optuna TPE sampler.
         n_trials: Positive number of parameter configurations to evaluate.
+        n_jobs: Concurrent Optuna trials; 1 is sequential and -1 uses all CPUs.
 
     Returns:
         A search result exposing best_estimator_, best_params_, best_score_
         and study_. The best estimator is refitted on all supplied rows.
 
-    Every CV fit clones preprocessing. Ensemble members share sampled settings
-    while retaining their assigned seeds. best_score_ is a selection score.
+    Every CV fit clones preprocessing. Ensemble members have separate parameter
+    paths while retaining their assigned seeds. best_score_ is a selection score.
     """
     if n_trials < 1:
         raise ValueError("tuning.n_trials must be positive")
+    if type(n_jobs) is not int or n_jobs == 0 or n_jobs < -1:
+        raise ValueError("tuning.n_jobs must be a positive integer or -1")
 
     study = optuna.create_study(
         direction="maximize", sampler=optuna.samplers.TPESampler(seed=seed),
         pruner=optuna.pruners.NopPruner(),
     )
 
-    model = estimator.named_steps["model"]
+    def objective(trial):
+        """Sample each parameter independently and return mean CV accuracy."""
+        params = {}
+        for name, distribution in distributions.items():
+            if isinstance(distribution, optuna.distributions.CategoricalDistribution):
+                params[name] = trial.suggest_categorical(name, distribution.choices)
+            elif isinstance(distribution, optuna.distributions.IntDistribution):
+                params[name] = trial.suggest_int(name, distribution.low, distribution.high,
+                                                 step=distribution.step, log=distribution.log)
+            else:
+                params[name] = trial.suggest_float(name, distribution.low, distribution.high,
+                                                   step=distribution.step, log=distribution.log)
+        candidate = clone(estimator).set_params(**params)
+        scores = cross_val_score(candidate, X, y, cv=cv, scoring="accuracy", n_jobs=1, error_score="raise")
+        trial.set_user_attr("inner_fold_scores", scores.tolist())
+        return float(np.mean(scores))
 
-    if isinstance(model, (VotingClassifier, StackingClassifier)):
-        # Sample one shared setting, then apply it to every member of the ensemble.
-        first_name = model.estimators[0][0]
-
-        def shared_params(params):
-            """Expand first-member parameter paths to every ensemble member."""
-            return {key.replace(f"model__{first_name}__", f"model__{name}__", 1): value
-                    for key, value in params.items() for name, _ in model.estimators}
-
-        def objective(trial):
-            """Sample shared member settings and return their mean CV accuracy."""
-            params = {}
-            for name, distribution in distributions.items():
-                if isinstance(distribution, optuna.distributions.CategoricalDistribution):
-                    params[name] = trial.suggest_categorical(name, distribution.choices)
-                elif isinstance(distribution, optuna.distributions.IntDistribution):
-                    params[name] = trial.suggest_int(name, distribution.low, distribution.high,
-                                                     step=distribution.step, log=distribution.log)
-                else:
-                    params[name] = trial.suggest_float(name, distribution.low, distribution.high,
-                                                       step=distribution.step, log=distribution.log)
-            candidate = clone(estimator).set_params(**shared_params(params))
-            scores = cross_val_score(candidate, X, y, cv=cv, scoring="accuracy", n_jobs=1, error_score="raise")
-            trial.set_user_attr("inner_fold_scores", scores.tolist())
-            return float(np.mean(scores))
-
-        study.optimize(objective, n_trials=n_trials)
-        best_params = shared_params(study.best_params)
-        fitted = clone(estimator).set_params(**best_params).fit(X, y)
-        return SimpleNamespace(best_estimator_=fitted, best_params_=best_params,
-                               best_score_=study.best_value, study_=study)
-
-    search = OptunaSearchCV(
-        clone(estimator), distributions, cv=cv, scoring="accuracy", n_trials=n_trials,
-        n_jobs=1, refit=True, study=study, error_score="raise",
-    )
-    search.fit(X, y)
-    return search
+    study.optimize(objective, n_trials=n_trials, n_jobs=n_jobs)
+    fitted = clone(estimator).set_params(**study.best_params).fit(X, y)
+    return SimpleNamespace(best_estimator_=fitted, best_params_=study.best_params,
+                           best_score_=study.best_value, study_=study)
 
 
 def fit_classical(data: TitanicData, estimator, config, run_dir, distributions=None, *, refit_all=True):
@@ -128,6 +110,7 @@ def fit_classical(data: TitanicData, estimator, config, run_dir, distributions=N
         search = tune_classical(
             estimator, distributions, X_train, y_train, inner,
             seed=config.base.seed, n_trials=config.tuning.n_trials,
+            n_jobs=OmegaConf.select(config, 'tuning.n_jobs', default=1),
         )
 
         best_params = search.best_params_
