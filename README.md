@@ -29,18 +29,19 @@ Local CV is **mean accuracy (%) ± fold SD (percentage points)**. Fixed models u
 
 ## Run and configure
 
-Model examples are in [configs/](configs/). Using configs:
+Check example [configs/](configs/). 
 
+Using configs:
 ```bash
 cp configs/config_catboost.yaml config.yaml
 ```
 
-Optuna is off in the examples; set `tuning.enabled: true` to use the included search space.
+Optuna is off in the examples; set `tuning.enabled: true` to turn on.
 
 DNN examples: [MyModel](configs/config_dnn.yaml) and [MyModelEmb](configs/config_dnn_embedding.yaml).
 `custom/Name` loads a PyTorch model from `src/models.py`; input sizes are inferred automatically.
 
-Place the original Titanic CSVs at `data/train.csv` and `data/test.csv`, then edit
+Place the data Titanic at `data/train.csv` and `data/test.csv`, then edit
 [config.yaml](config.yaml) and run:
 
 ```bash
