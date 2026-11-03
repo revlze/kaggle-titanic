@@ -16,7 +16,7 @@ from utils import predict_classifier
 def run_cv_experiment(data: TitanicData, model_specs, results_path, *,
                           n_trials=20, epochs=30, run_kind="full", device="cpu",
                           tune=True, n_splits=5, inner_splits=3,
-                          output_dir=None, batch_size=64, val_size=0.2):
+                          output_dir=None, batch_size=64, val_size=0.2, n_jobs=1):
     """Only the train set enters evaluation fits or hyperparameter search.
 
     Classical specs contain estimator/distributions; DNN specs contain
@@ -44,6 +44,7 @@ def run_cv_experiment(data: TitanicData, model_specs, results_path, *,
         output_dir: Exact new evaluation directory, overriding results_path/run_id.
         batch_size: Requested DNN batch size.
         val_size: Fraction of DNN training rows reserved for internal validation.
+        n_jobs: Concurrent classical Optuna trials; DNN searches stay sequential.
 
     Returns:
         A results dictionary containing the protocol, model summaries, fold records
@@ -90,7 +91,7 @@ def run_cv_experiment(data: TitanicData, model_specs, results_path, *,
                 if tune:
                     search = tune_classical(
                         spec["estimator"], spec["distributions"], X_train, y_train, inner,
-                        seed=fold_seed, n_trials=n_trials,
+                        seed=fold_seed, n_trials=n_trials, n_jobs=n_jobs,
                     )
                     fitted = search.best_estimator_
                     study = search.study_
