@@ -27,10 +27,6 @@ Local CV is **mean accuracy (%) ± fold SD (percentage points)**. Fixed models u
 | Gradient boosting + ticket/cabin (5 models, hard vote) | 0 | 83.43 ± 0.96 | 0.76794 |
 | Gradient boosting + ticket/cabin + Optuna (5 models, hard vote) | 10 | 83.00 ± 2.56 | **0.77990** |
 
-[earlier result snapshot](docs/experiment-results.json), [some experiment notes](docs/EXPERIMENTS.md).
-
-![Earlier runs before the new ticket/cabin features: local CV versus Kaggle public accuracy.](docs/figures/accuracy-comparison.svg)
-
 ## Run and configure
 
 Model examples are in [configs/](configs/). Using configs:
