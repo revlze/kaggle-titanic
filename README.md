@@ -42,7 +42,7 @@ Example configurations are in [configs/](configs/).
 To use the selected best parameters:
 
 ```bash
-cp configs/best_model.yaml config.yaml
+cp configs/014_best_model.yaml config.yaml
 ```
 
 Place the Titanic CSVs at `data/train.csv` and `data/test.csv`, then edit if needed
@@ -98,7 +98,7 @@ in `ensemble.method`. Without a member list, these are copies of one model famil
 
 For different algorithms or different settings of one algorithm, use
 `model.name: ensemble`, `model.params: {}` and an `ensemble.members` list of
-`name`/`params` entries; see `configs/ensemble.yaml`. The member count comes from
+`name`/`params` entries; see `configs/011_ensemble.yaml`. The member count comes from
 the list. Each member has its own preprocessing pipeline and may override
 `preprocessing` (for example, `scale: true` for logistic regression).
 With `tuning.enabled: false`, the configured parameters are used directly.
@@ -112,7 +112,7 @@ Custom DNNs still use one model per run.
 
 </details>
 
-DNN examples: [MyModel](configs/dnn.yaml) and [MyModelEmb](configs/dnn_embedding.yaml).
+DNN examples: [MyModel](configs/009_dnn.yaml) and [MyModelEmb](configs/010_dnn_embedding.yaml).
 `custom/Name` loads a PyTorch model from `src/models.py`; input sizes are inferred automatically.
 
 Base features: `Pclass`, `Age`, `SibSp`, `Parch`, `Fare`, `Sex`, `Embarked`,

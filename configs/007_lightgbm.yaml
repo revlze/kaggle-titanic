@@ -13,7 +13,7 @@ data:
   test_path: data/test.csv
 
 features:
-  feature_set: base_title_family
+  feature_set: base_title_family_extticket_extcabin
 
 preprocessing:
   encoding: onehot

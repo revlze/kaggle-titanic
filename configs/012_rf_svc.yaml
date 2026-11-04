@@ -1,0 +1,75 @@
+# Copy to config.yaml, then run: uv run python run.py
+# Candidate ensemble; its quality has not been evaluated.
+base:
+  exp_name: rf_svc_v1_optuna
+  seed: 0xFACED
+  run_kind: full
+
+run:
+  mode: full
+  model_path: null
+
+data:
+  train_path: data/train.csv
+  test_path: data/test.csv
+
+features:
+  feature_set: base_title_family_extticket_extcabin
+
+preprocessing:
+  encoding: onehot
+  scale: false
+
+model:
+  name: ensemble
+  params: {}
+
+ensemble:
+  n_models: 2
+  method: soft  # Average RF and SVC class probabilities with equal weights.
+  members:
+    - name: RandomForestClassifier
+      preprocessing:
+        scale: false
+      params:
+        n_estimators: 300
+        max_depth: 6
+        min_samples_leaf: 3
+        max_features: sqrt
+        n_jobs: 1
+      search_space:
+        n_estimators: {type: int, low: 100, high: 400, step: 100}
+        max_depth: {type: int, low: 3, high: 12}
+        min_samples_leaf: {type: int, low: 1, high: 8}
+        max_features: {type: categorical, choices: [sqrt, log2, 0.8]}
+    - name: SVC
+      preprocessing:
+        scale: true  # Fit StandardScaler inside each training fold.
+      params:
+        C: 1.0
+        kernel: rbf
+        gamma: scale
+        probability: true  # Required for soft voting.
+      search_space:
+        C: {type: float, low: 0.001, high: 100.0, log: true}
+        gamma: {type: float, low: 0.0001, high: 1.0, log: true}
+  stacking_folds: 3
+  meta_model:
+    name: LogisticRegression
+    params: {C: 1.0, max_iter: 2000}
+
+validation:
+  train_size: 0.8
+  n_splits: 5
+  inner_splits: 3
+
+tuning:
+  enabled: true  # Set false to evaluate the fixed member parameters.
+  n_trials: 20  # Per outer fold, plus one separate final search.
+  search_space: {}  # Ensemble search ranges are defined per member above.
+
+metric:
+  name: accuracy
+
+output:
+  dir: artifacts

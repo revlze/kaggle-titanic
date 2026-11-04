@@ -1,6 +1,6 @@
 # Copy to config.yaml, then run: uv run python run.py
 base:
-  exp_name: logistic_regression_baseline
+  exp_name: gradient_boosting_baseline
   seed: 0xFACED
   run_kind: full
 
@@ -13,22 +13,26 @@ data:
   test_path: data/test.csv
 
 features:
-  feature_set: base_title_family
+  feature_set: base_title_family_extticket_extcabin
 
 preprocessing:
   encoding: onehot
-  scale: true
+  scale: false
 
 model:
-  name: LogisticRegression
+  name: GradientBoostingClassifier
   params:
-    C: 1.0
-    max_iter: 2000
+    loss: log_loss
+    n_estimators: 100
+    learning_rate: 0.1
+    max_depth: 3
+    min_samples_leaf: 1
+    subsample: 1.0  # Values below 1 add row subsampling.
     random_state: ${base.seed}
 
 ensemble:
-  n_models: 1  # Identical deterministic fits gain nothing from extra seeds.
-  method: soft
+  n_models: 1  # Set to 5 for five seeds; subsample < 1 adds diversity.
+  method: soft  # soft, hard, stacking
   stacking_folds: 3
   meta_model:
     name: LogisticRegression
@@ -43,7 +47,10 @@ tuning:
   enabled: false  # Set true to use Optuna; use a new exp_name for the tuned run.
   n_trials: 20  # Per outer fold, plus one separate final search.
   search_space:
-    C: {type: float, low: 0.001, high: 100.0, log: true}
+    n_estimators: {type: int, low: 100, high: 400, step: 50}
+    learning_rate: {type: float, low: 0.01, high: 0.1, log: true}
+    max_depth: {type: int, low: 2, high: 4}
+    min_samples_leaf: {type: int, low: 1, high: 15}
 
 metric:
   name: accuracy

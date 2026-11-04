@@ -1,0 +1,55 @@
+# Copy to config.yaml, then run: uv run python run.py
+base:
+  exp_name: svc_baseline
+  seed: 0xFACED
+  run_kind: full
+
+run:
+  mode: full
+  model_path: null
+
+data:
+  train_path: data/train.csv
+  test_path: data/test.csv
+
+features:
+  feature_set: base_title_family_extticket_extcabin
+
+preprocessing:
+  encoding: onehot
+  scale: true  # SVC requires StandardScaler for numeric features.
+
+model:
+  name: SVC
+  params:
+    C: 1.0
+    kernel: rbf
+    gamma: scale
+    probability: true  # Enables probabilities for reports, soft voting and stacking.
+    random_state: ${base.seed}
+
+ensemble:
+  n_models: 1
+  method: soft
+  stacking_folds: 3
+  meta_model:
+    name: LogisticRegression
+    params: {C: 1.0, max_iter: 2000}
+
+validation:
+  train_size: 0.8
+  n_splits: 5
+  inner_splits: 3
+
+tuning:
+  enabled: false  # Set true to use Optuna; use a new exp_name for the tuned run.
+  n_trials: 20  # Per outer fold, plus one separate final search.
+  search_space:
+    C: {type: float, low: 0.001, high: 100.0, log: true}
+    gamma: {type: float, low: 0.0001, high: 1.0, log: true}
+
+metric:
+  name: accuracy
+
+output:
+  dir: artifacts

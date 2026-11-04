@@ -1,6 +1,6 @@
 # Copy to config.yaml, then run: uv run python run.py
 base:
-  exp_name: dnn_baseline
+  exp_name: dnn_embedding_baseline
   seed: 0xFACED
   run_kind: full
 
@@ -13,18 +13,24 @@ data:
   test_path: data/test.csv
 
 features:
-  feature_set: base_title_family
+  feature_set: base_title_family_extticket_extcabin
 
 preprocessing:
-  encoding: onehot
+  encoding: ordinal  # Category IDs for embeddings, not one-hot columns.
   scale: true
 
 model:
-  name: custom/MyModel
+  name: custom/MyModelEmb
   params:
-    out: 1  # Raw logit; inp is inferred from fitted preprocessing.
+    out: 1
     hidden_sizes: [64, 32]
     dropout: 0.1
+    sex_emb_dim: 2
+    embarked_emb_dim: 2
+    cabin_emb_dim: 2
+    ticket_emb_dim: 2
+    title_emb_dim: 2
+    # inp, category sizes and slices are inferred inside each training fold.
 
 loss:
   name: BCEWithLogitsLoss
@@ -41,7 +47,7 @@ scheduler:
 training:
   epochs: 30
   batch_size: 64
-  device: cpu  # cpu, cuda or mps, depending on available hardware.
+  device: cpu
 
 ensemble:
   n_models: 1
@@ -50,12 +56,12 @@ validation:
   train_size: 0.8
   n_splits: 5
   inner_splits: 3
-  val_size: 0.2  # Internal validation split; never the outer evaluation fold.
+  val_size: 0.2
 
 tuning:
   enabled: false
   n_trials: 20
-  search_space:  # DNN keys use model.*, optimizer.* or scheduler.*.
+  search_space:
     model.dropout: {type: float, low: 0.0, high: 0.3}
     optimizer.lr: {type: float, low: 0.0001, high: 0.01, log: true}
     optimizer.weight_decay: {type: float, low: 0.00001, high: 0.01, log: true}

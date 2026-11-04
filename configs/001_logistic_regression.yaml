@@ -1,6 +1,6 @@
 # Copy to config.yaml, then run: uv run python run.py
 base:
-  exp_name: catboost_baseline
+  exp_name: logistic_regression_baseline
   seed: 0xFACED
   run_kind: full
 
@@ -13,26 +13,22 @@ data:
   test_path: data/test.csv
 
 features:
-  feature_set: base_title_family
+  feature_set: base_title_family_extticket_extcabin
 
 preprocessing:
-  encoding: onehot  # Uses the existing pipeline, not native categorical handling.
-  scale: false
+  encoding: onehot
+  scale: true
 
 model:
-  name: CatBoostClassifier
+  name: LogisticRegression
   params:
-    loss_function: Logloss
-    iterations: 300
-    depth: 4
-    learning_rate: 0.05
-    l2_leaf_reg: 3.0
-    thread_count: 1
+    C: 1.0
+    max_iter: 2000
     random_state: ${base.seed}
 
 ensemble:
-  n_models: 1  # Set to 5 for five models with different seeds.
-  method: soft  # soft, hard, stacking
+  n_models: 1  # Identical deterministic fits gain nothing from extra seeds.
+  method: soft
   stacking_folds: 3
   meta_model:
     name: LogisticRegression
@@ -47,10 +43,7 @@ tuning:
   enabled: false  # Set true to use Optuna; use a new exp_name for the tuned run.
   n_trials: 20  # Per outer fold, plus one separate final search.
   search_space:
-    iterations: {type: int, low: 200, high: 600, step: 100}
-    depth: {type: int, low: 3, high: 6}
-    learning_rate: {type: float, low: 0.02, high: 0.1, log: true}
-    l2_leaf_reg: {type: float, low: 1.0, high: 10.0, log: true}
+    C: {type: float, low: 0.001, high: 100.0, log: true}
 
 metric:
   name: accuracy

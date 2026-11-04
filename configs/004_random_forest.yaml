@@ -1,6 +1,6 @@
 # Copy to config.yaml, then run: uv run python run.py
 base:
-  exp_name: knn_baseline
+  exp_name: random_forest_baseline
   seed: 0xFACED
   run_kind: full
 
@@ -13,23 +13,24 @@ data:
   test_path: data/test.csv
 
 features:
-  feature_set: base_title_family
+  feature_set: base_title_family_extticket_extcabin
 
 preprocessing:
   encoding: onehot
-  scale: true  # KNN uses distances.
+  scale: false
 
 model:
-  name: KNeighborsClassifier
+  name: RandomForestClassifier
   params:
-    n_neighbors: 15
-    weights: distance
-    metric: minkowski
-    p: 2  # 1 = Manhattan, 2 = Euclidean.
+    n_estimators: 300
+    max_depth: 6
+    min_samples_leaf: 3
+    max_features: sqrt
     n_jobs: 1
+    random_state: ${base.seed}
 
 ensemble:
-  n_models: 1  # KNN has no seed-based variation; keep one model.
+  n_models: 1
   method: soft
   stacking_folds: 3
   meta_model:
@@ -45,9 +46,10 @@ tuning:
   enabled: false  # Set true to use Optuna; use a new exp_name for the tuned run.
   n_trials: 20  # Per outer fold, plus one separate final search.
   search_space:
-    n_neighbors: {type: int, low: 3, high: 31, step: 2}
-    weights: {type: categorical, choices: [uniform, distance]}
-    p: {type: categorical, choices: [1, 2]}
+    n_estimators: {type: int, low: 100, high: 400, step: 100}
+    max_depth: {type: int, low: 3, high: 12}
+    min_samples_leaf: {type: int, low: 1, high: 8}
+    max_features: {type: categorical, choices: [sqrt, log2, 0.8]}
 
 metric:
   name: accuracy
