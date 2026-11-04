@@ -17,21 +17,24 @@ The best stacking model uses 3 OOF folds to train its meta-model.
 | Model / setup | Optuna trials / search | Local CV, % ± SD | Public accuracy |
 |---|---:|---:|---:|
 | Logistic regression (baseline) | 0 | 82.72 ± 2.15 | 0.77272 |
-| Logistic regression + Optuna | 60 | 82.30 ± 2.44 | 0.77272 |
+| Logistic regression + FE + Optuna | 20 | 82.02 ± 2.33 | 0.77272 |
 | Gradient boosting (baseline) | 0 | 82.86 ± 1.71 | 0.76076 |
 | Gradient boosting + Optuna | 20 | 83.00 ± 2.10 | 0.75837 |
 | XGBoost + Optuna | 60 | 83.56 ± 3.24 | 0.75837 |
-| XGBoost ensemble (5 models) | 60 | 82.87 ± 2.62 | 0.75598 |
+| XGBoost ensemble (5 models, тут хрень, просто разные сиды были по сути) | 60 | 82.87 ± 2.62 | 0.75598 |
 | LightGBM + Optuna | 60 | 82.58 ± 2.81 | 0.76076 |
 | K-nearest neighbors + Optuna | 60 | 81.32 ± 3.13 | 0.75837 |
-| Logistic regression + ticket | 0 | 82.72 ± 2.89 | 0.77751 |
-| LightGBM + ticket | 0 | 83.71 ± 4.24 | 0.77033 |
-| Logistic regression + ticket/cabin | 0 | 81.31 ± 2.30 | 0.77751 |
-| LightGBM + ticket/cabin | 0 | 83.42 ± 2.79 | 0.76794 |
-| LightGBM + ticket/cabin + Optuna | 60 | 83.42 ± 1.95 | 0.76794 |
-| Gradient boosting + ticket/cabin (5 models, hard vote) | 0 | 83.43 ± 0.96 | 0.76794 |
-| Gradient boosting + ticket/cabin + Optuna (5 models, hard vote) | 10 | 83.00 ± 2.56 | 0.77990 |
+| Logistic regression + FE | 0 | 82.72 ± 2.89 | 0.77751 |
+| LightGBM + FE | 0 | 83.71 ± 4.24 | 0.77033 |
+| Logistic regression + FE | 0 | 81.31 ± 2.30 | 0.77751 |
+| LightGBM + FE | 0 | 83.42 ± 2.79 | 0.76794 |
+| LightGBM + FE + Optuna | 60 | 83.42 ± 1.95 | 0.76794 |
+| Gradient boosting + FE (5 models, hard vote) | 0 | 83.43 ± 0.96 | 0.76794 |
+| Gradient boosting + FE + Optuna (5 models, hard vote) | 10 | 83.00 ± 2.56 | 0.77990 |
 | Stacking (GB + LR + RF + DT) + Optuna | 20 | 83.43 ± 1.24 | **0.78229** |
+| Random forest + FE + Optuna | 30 | 81.60 ± 1.99 | **0.78229** |
+| CatBoost (baseline) | 0 | 82.86 ± 1.83 | 0.76794 |
+| CatBoost + FE + Optuna | 20 | 81.18 ± 1.19 | 0.77751 |
 
 </details>
 
