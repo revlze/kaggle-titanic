@@ -24,6 +24,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import StratifiedKFold
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.pipeline import Pipeline
+from sklearn.svm import SVC
 from sklearn.tree import DecisionTreeClassifier
 from xgboost import XGBClassifier
 from catboost import CatBoostClassifier
@@ -108,6 +109,7 @@ def get_model(config, *, load_pretrained=True, **runtime_params):
         'CatBoostClassifier': CatBoostClassifier,
         'LGBMClassifier': LGBMClassifier,
         'KNeighborsClassifier': KNeighborsClassifier,
+        'SVC': SVC,
     }
     if config.model.name in classifiers:
         if config.model.name == 'CatBoostClassifier':
@@ -145,11 +147,12 @@ def get_pipeline(config, data: TitanicData):
 
     Raises:
         ValueError: The model, ensemble size, voting method or stacking folds
-            are unsupported. Seed ensembles cannot contain identical KNN copies.
+            are unsupported, or SVC preprocessing disables scaling.
+            Seed ensembles cannot contain identical KNN copies.
     """
     supported = {
         'GradientBoostingClassifier', 'LogisticRegression', 'CatBoostClassifier', 'XGBClassifier', 'LGBMClassifier',
-        'KNeighborsClassifier', 'RandomForestClassifier', 'DecisionTreeClassifier',
+        'KNeighborsClassifier', 'RandomForestClassifier', 'DecisionTreeClassifier', 'SVC',
     }
     member_configs = OmegaConf.select(config, 'ensemble.members')
     if member_configs is not None:
@@ -173,6 +176,8 @@ def get_pipeline(config, data: TitanicData):
     method = OmegaConf.select(config, 'ensemble.method', default='soft')
     if method not in {'soft', 'hard', 'stacking'}:
         raise ValueError('ensemble.method must be soft, hard or stacking')
+    if config.model.name == 'SVC' and not config.preprocessing.scale:
+        raise ValueError('SVC requires preprocessing.scale: true to use StandardScaler')
     numeric, categorical = data.numeric_columns, data.categorical_columns
     preprocess = make_preprocess(numeric, categorical, **config.preprocessing)
     if n_models > 1:
@@ -190,6 +195,8 @@ def get_pipeline(config, data: TitanicData):
                     'model': {'name': member_config.name, 'params': params},
                 }))
                 preprocessing = OmegaConf.merge(config.preprocessing, member_config.get('preprocessing', {}))
+                if member_config.name == 'SVC' and not preprocessing.scale:
+                    raise ValueError('SVC requires preprocessing.scale: true to use StandardScaler')
                 member_preprocess = make_preprocess(numeric, categorical, **preprocessing)
             else:
                 member = clone(model).set_params(random_state=int(seed))
