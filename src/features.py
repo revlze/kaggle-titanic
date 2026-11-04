@@ -69,6 +69,7 @@ def make_features(df: pl.DataFrame, feature_set="base"):
             .str.extract_all(r"[A-Z]+")
             .list.unique(maintain_order=True)
             .list.join("")
+            .fill_null("NONE")
             .alias("CabinLet"),
 
             pl.col("Cabin")
